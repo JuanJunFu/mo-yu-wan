@@ -63,6 +63,43 @@
   .rules .win.boss{border-left-color:var(--red)} .rules .win b{color:var(--gold)}
   .rules .z{display:inline-block;font-size:.8rem;color:var(--muted)}
   .err{color:#e07a6a;text-align:center;font-weight:700;min-height:20px}
+  /* ===== 手牌 ===== */
+  .hand{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+  .hcard{border:1px solid var(--kraft2);border-radius:8px;padding:6px 9px;font-size:.8rem;background:#221b10;cursor:pointer;user-select:none;line-height:1.3}
+  .hcard .hn{font-weight:800}.hcard .hd{color:var(--muted);font-size:.7rem}
+  .hcard.passive{cursor:default;border-style:dashed;opacity:.85}
+  .hcard.sel{outline:2px solid var(--gold);background:#2a2213}
+  /* ===== 幽靈面板 ===== */
+  .ghostbox{border:1px solid #7a6a9a;border-radius:10px;padding:10px;background:#191322;margin:8px 0}
+  .ghostbox .gb{display:flex;gap:6px;margin-top:6px}
+  .ghostbox button{margin:0;font-size:.85rem;padding:9px 6px;background:#2a2140;color:#cabce8;border:1px solid #7a6a9a}
+  .ghostbox button.on{background:#7a6a9a;color:#fff}
+  /* ===== 動畫揭曉板 ===== */
+  .board{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+  .bzone{border:2px solid var(--kraft2);border-radius:10px;min-height:86px;padding:6px 8px;background:#1c150d;position:relative;transition:box-shadow .3s,border-color .3s;overflow:hidden}
+  .bzone.office{grid-column:1/3;min-height:70px;border-color:var(--green)}
+  .bzone .bt{font-size:.78rem;color:var(--muted);font-weight:800}
+  .bzone.inspected{border-color:var(--red);box-shadow:0 0 14px rgba(192,57,43,.55);animation:pulseR 1s ease-in-out 2}
+  .bzone .stamp{position:absolute;top:4px;right:6px;font-size:1.4rem;opacity:0;transform:scale(2.2);transition:all .35s cubic-bezier(.2,1.6,.4,1)}
+  .bzone .stamp.in{opacity:1;transform:scale(1)}
+  @keyframes pulseR{0%,100%{background:#1c150d}50%{background:#33130f}}
+  .chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+  .chip{display:inline-flex;align-items:center;gap:3px;background:#2a2213;border:1px solid var(--line);border-radius:99px;padding:2px 9px;font-size:.8rem;font-weight:700;opacity:0;transform:translateY(14px) scale(.6);transition:all .4s cubic-bezier(.2,1.4,.4,1);position:relative}
+  .chip.in{opacity:1;transform:none}
+  .chip.caught{animation:shake .5s ease-in-out 2;border-color:var(--red);background:#33130f}
+  .chip.safe2{border-color:var(--green)}
+  .chip.dead{opacity:.45;filter:grayscale(1)}
+  @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px) rotate(-3deg)}40%{transform:translateX(5px) rotate(3deg)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+  .float{position:absolute;left:50%;top:-4px;transform:translateX(-50%);font-size:.82rem;font-weight:900;pointer-events:none;opacity:0;white-space:nowrap;z-index:5}
+  .float.go{animation:floatUp 1.6s ease-out forwards}
+  .float.gold{color:var(--gold)}.float.red{color:#e07a6a}.float.blue{color:#8fb4d8}
+  @keyframes floatUp{0%{opacity:0;transform:translate(-50%,4px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-26px)}}
+  .toast{border:1px solid #7a6a9a;background:#191322;color:#cabce8;border-radius:8px;padding:6px 10px;font-size:.85rem;margin:5px 0;opacity:0;transform:translateX(-16px);transition:all .4s ease}
+  .toast.in{opacity:1;transform:none}
+  .sumline{display:flex;align-items:center;gap:6px;font-size:.92rem;padding:5px 8px;border-radius:8px;background:#191510;margin:3px 0;opacity:0;transition:opacity .4s}
+  .sumline.in{opacity:1}
+  .sumline .sn{font-weight:800;flex:0 0 auto}.sumline .si{margin-left:auto;font-weight:900;flex:0 0 auto}
+  .si.gold{color:var(--gold)}.si.red{color:#e07a6a}.si.mut{color:var(--muted)}
   .seg{display:flex;gap:6px;margin:4px 0}
   .seg button{flex:1;margin:0;font-size:.82rem;padding:8px;background:#2a2016;color:var(--muted);border:1px solid var(--line);font-weight:600}
   .seg button.on{background:var(--gold);color:#241c10;border-color:var(--gold);font-weight:900}
@@ -158,8 +195,11 @@
       <!-- 員工選動作 -->
       <div id="empchoose" class="hide">
         <div id="helpbox"></div>
+        <div id="handbox"></div>
         <div class="zones" id="empzones"></div>
       </div>
+      <!-- 幽靈作祟 -->
+      <div id="ghostchoose" class="hide"></div>
       <!-- 主管協查 -->
       <div id="supchoose" class="hide">
         <div class="hint" id="suphint"></div>
@@ -173,10 +213,13 @@
         <button id="bosssubmit" onclick="submitBoss()">確定巡這些地方</button>
       </div>
 
-      <!-- 揭曉 -->
+      <!-- 揭曉（動畫過場） -->
       <div id="reveal" class="hide">
         <h2 id="revtitle"></h2>
-        <div id="revlist"></div>
+        <div id="revtoasts"></div>
+        <div class="board" id="revboard"></div>
+        <div id="revsum"></div>
+        <details style="margin-top:6px"><summary style="cursor:pointer;font-size:.8rem;color:var(--muted)">📄 詳細文字</summary><div id="revlist"></div></details>
         <button id="nextbtn" class="hide" onclick="sock.emit('nextRound')">下一回合 ▶</button>
         <div id="waitnext" class="hint hide">等房主進入下一回合…</div>
       </div>
@@ -232,7 +275,7 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null;
+const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null;
 const seg={bossmode:'host',senmode:'balanced',threshold:'mid'};
 function $(id){return document.getElementById(id)}
 function show(id){['s-home','s-lobby','s-game','s-end','s-spec'].forEach(s=>$(s).classList.toggle('hide',s!==id))}
@@ -303,7 +346,10 @@ sock.on('kicked',({reason})=>{ST=null;show('s-home');err(reason||'房間已關�
 setInterval(()=>{if(!ST)refreshRooms();},5000);
 function doStart(){sock.emit('startGame',{bossMode:seg.bossmode,seniorityMode:seg.senmode,threshold:seg.threshold},r=>{if(r&&r.error)return err(r.error);});}
 function submitBoss(){if(bossPicks.length!==ST.bossInspect)return err('請選 '+ST.bossInspect+' 個地方');sock.emit('submitChoice',{zones:bossPicks},r=>{if(r&&r.error)return err(r.error);});}
-function chooseEmp(action,zone){sock.emit('submitChoice',{action,zone,helpTarget},r=>{if(r&&r.error)return err(r.error);});}
+function chooseEmp(action,zone){sock.emit('submitChoice',{action,zone,helpTarget,cardIdx:selCard},r=>{if(r&&r.error)return err(r.error);});}
+function ghostAct(type,targetId){ghostMode=null;sock.emit('submitChoice',{ghostAction:{type,targetId}},r=>{if(r&&r.error)return err(r.error);});}
+function ghostWarnMenu(){ghostMode=ghostMode==='warn'?null:'warn';renderGhost();}
+function toggleCard(i){selCard=(selCard===i)?null:i;renderEmpZones();}
 const ZI={office:'🏢',tea:'☕',copy:'🖨️',toilet:'🚻',roof:'🪟'};
 
 sock.on('state',s=>{ST=s;render();});
@@ -354,7 +400,7 @@ function renderGame(){
   if(you.role==='emp'&&you.task){const t=you.task;mt.innerHTML=`<div class="task">📋 你的任務：<b>${esc(t.name)}</b>${t.state==='grace'?' <span class="tag t-boss">補交中</span>':''}<div>進度 ${t.progress}/${t.need}　剩 ${t.deadlineLeft} 回合<div class="bar"><div class="fill" style="width:${Math.min(100,t.progress/t.need*100)}%"></div></div></div></div>`;}
   else mt.innerHTML='';
 
-  ['admin','empchoose','supchoose','bosschoose','reveal'].forEach(x=>$(x).classList.add('hide'));
+  ['admin','empchoose','supchoose','bosschoose','ghostchoose','reveal'].forEach(x=>$(x).classList.add('hide'));
 
   if(ST.phase==='admin'){
     $('admin').classList.remove('hide');
@@ -369,7 +415,10 @@ function renderGame(){
   } else if(ST.phase==='choosing'){
     const waiting=ST.players.filter(p=>!p.submitted&&p.alive).map(p=>p.name);
     $('status').textContent=you.submitted?('已送出，等：'+waiting.join('、')):'請做選擇';
-    if(!you.alive){$('status').textContent='你已出局（幽靈），觀戰中…';return;}
+    if(!you.alive){
+      if(you.isGhost){renderGhost();$('ghostchoose').classList.remove('hide');$('status').textContent='你是幽靈 👻 可作祟攪局';}
+      else $('status').textContent='觀戰中…';
+      return;}
     if(you.role==='boss'){renderBossZones();$('bosschoose').classList.remove('hide');$('bosssubmit').disabled=you.submitted;$('bosshint').textContent='選 '+ST.bossInspect+' 個要巡查的地方';}
     else if(you.isSupervisor){renderSupZones();$('supchoose').classList.remove('hide');}
     else {renderEmpZones();$('empchoose').classList.remove('hide');}
@@ -396,8 +445,32 @@ function renderSupZones(){
 function pickSup(k){supPick=k;renderSupZones();}
 function submitSup(){sock.emit('submitChoice',{inspectZone:supPick},r=>{if(r&&r.error)return err(r.error);});}
 function toggleHelp(id){helpTarget=id;renderEmpZones();}
+function renderGhost(){
+  const you=ST.you, acted=you.ghostActed, cd=you.ghostCooldown;
+  let html='<div class="ghostbox"><b>👻 幽靈作祟</b>';
+  if(acted) html+='<div class="hint" style="text-align:left">本回合已作祟，看好戲…</div>';
+  else if(cd>0) html+=`<div class="hint" style="text-align:left">作祟冷卻中（還 ${cd} 回合）</div>`;
+  else {
+    html+='<div class="gb">'
+      +`<button onclick="ghostAct('haunt')">👻 騷擾老闆<br><span style="font-size:.68rem">隨機少巡一區</span></button>`
+      +`<button onclick="ghostAct('disrupt')">🌀 打斷協查<br><span style="font-size:.68rem">主管白跑一趟</span></button>`
+      +`<button class="${ghostMode==='warn'?'on':''}" onclick="ghostWarnMenu()">📞 通風報信<br><span style="font-size:.68rem">救一位同事</span></button></div>`;
+    if(ghostMode==='warn') html+='<div class="gb" style="flex-wrap:wrap;margin-top:6px">'
+      +(you.ghostTargets||[]).map(t=>`<button style="flex:0 0 auto" onclick="ghostAct('warn','${t.id}')">${esc(t.name)}</button>`).join('')+'</div>';
+  }
+  $('ghostchoose').innerHTML=html+'</div>';
+}
+function renderHand(){
+  const you=ST.you, sub=you.submitted, hand=you.hand||[];
+  if(!hand.length){$('handbox').innerHTML='';return;}
+  $('handbox').innerHTML='<div style="font-size:.78rem;color:var(--kraft2);margin:4px 0 2px">🃏 手牌（道具點了再選動作＝本回合使用）</div><div class="hand">'
+    +hand.map((c,i)=>c.kind==='item'
+      ?`<div class="hcard ${selCard===i?'sel':''}" onclick="${sub?'':`toggleCard(${i})`}"><span class="hn">${c.icon} ${esc(c.name)}</span><div class="hd">${c.desc}</div></div>`
+      :`<div class="hcard passive"><span class="hn">${c.icon} ${esc(c.name)}</span><div class="hd">藉口·${c.desc}</div></div>`).join('')+'</div>';
+}
 function renderEmpZones(){
   const you=ST.you, sub=you.submitted, hasTask=!!you.task;
+  renderHand();
   if(you.juniors&&you.juniors.length&&!sub){
     $('helpbox').innerHTML='<div style="font-size:.82rem;color:var(--blue);margin:6px 0">🦉 罩學弟（選填，擋他一次被抓）：<span style="display:inline-flex;flex-wrap:wrap">'+
       you.juniors.map(j=>`<button style="width:auto;padding:4px 10px;margin:2px;font-size:.82rem" class="${helpTarget===j.id?'on':''}" onclick="toggleHelp('${j.id}')">${esc(j.name)}</button>`).join('')+
@@ -416,12 +489,84 @@ function renderBossZones(){
     return `<div class="zone ${sel?'sel':''}" style="${locked?'opacity:.35;pointer-events:none':''}" onclick="pickBoss('${k}')"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">${locked?'已連查2回·鎖':'點選巡查'}</div></div>`;}).join('');
 }
 function pickBoss(k){const i=bossPicks.indexOf(k);if(i>=0)bossPicks.splice(i,1);else{if(bossPicks.length>=ST.bossInspect)bossPicks.shift();bossPicks.push(k);}renderBossZones();}
+let revAnimKey=null, revTimers=[];
+function rvT(fn,ms){revTimers.push(setTimeout(fn,ms));}
 function renderReveal(){
-  bossPicks=[]; supPick=null; helpTarget=null;
+  bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null;
   const r=ST.reveal;if(!r)return;
-  $('revtitle').textContent=`第 ${r.round} 回合 · 老闆巡：${r.bossZones.join('、')||'（無）'}${r.supZone?'｜主管協查 '+r.supZone:''}　｜完成率 ${r.rate}%`;
-  $('revlist').innerHTML=r.results.map(x=>{const cls=x.caught===true?'caught':(x.gain!=null?'ok':'');
+  $('revtitle').textContent=`第 ${r.round} 回合揭曉`;
+  // 詳細文字（收合備查）
+  $('revlist').innerHTML=`<div class="rev">老闆巡：${r.bossZones.join('、')||'（無）'}${r.supZone?'｜主管協查 '+r.supZone:''}｜完成率 ${r.rate}%</div>`
+    +(r.ghostNotes||[]).map(g=>`<div class="rev">${g.icon} ${esc(g.text)}</div>`).join('')
+    +r.results.map(x=>{const cls=x.caught===true?'caught':(x.gain!=null?'ok':'');
     return `<div class="rev ${cls} ${x.eliminated?'out':''}"><b>${esc(x.name)}</b> ${x.seniority==='senior'?'🦉':'🐣'} → ${x.zoneName}：${x.note}${x.eliminated?' 💀出局':''}</div>`;}).join('');
+  // 動畫只播一次（同回合重繪不重播）
+  const key=ST.code+':'+r.round;
+  if(revAnimKey===key)return;
+  revAnimKey=key; revTimers.forEach(clearTimeout); revTimers=[];
+  playReveal(r);
+}
+function outcomeIcon(x){
+  if(x.eliminated)return['💀','red'];
+  if(x.caught===true)return['🚨 +'+(x.anx||2)+'心悸','red'];
+  if(x.caught==='excused')return['🗣️ 藉口滑走','blue'];
+  if(x.caught==='warned')return['📞 收到報信','blue'];
+  if(x.caught==='guarded')return['🦉 學長罩','blue'];
+  if(x.caught==='blocked')return['🛡️ 免死','blue'];
+  if(x.gain!=null)return['💰 +'+x.gain,'gold'];
+  if(x.working)return['💼 認真','mut'];
+  if(x.supervisor)return['🕵️ 主管','mut'];
+  return['😴 休息','mut'];
+}
+function playReveal(r){
+  // ① 蓋辦公室地圖
+  const zoneOrder=['office',...ST.slackZones];
+  $('revboard').innerHTML=zoneOrder.map(k=>{const z=ST.zones[k];
+    return `<div class="bzone ${k==='office'?'office':''}" id="rz_${k}"><span class="bt">${ZI[k]} ${z.name}</span><span class="stamp" id="st_${k}"></span><div class="chips" id="ch_${k}"></div></div>`;}).join('');
+  $('revtoasts').innerHTML=''; $('revsum').innerHTML='';
+  // ② 員工滑入各區
+  r.results.forEach((x,i)=>{
+    const zk=(x.zone&&ST.zones[x.zone])?x.zone:'office';
+    const em=x.supervisor?'🕵️':(x.seniority==='senior'?'🦉':'🐣');
+    const suffix=x.working?'💼':'';
+    const el=document.createElement('span');el.className='chip';el.id='rc_'+i;
+    el.innerHTML=`${em} ${esc(x.name)}${suffix}`;
+    $('ch_'+zk).appendChild(el);
+    rvT(()=>el.classList.add('in'),150+i*140);
+  });
+  const n=r.results.length;
+  let t=500+n*140;
+  // ③ 幽靈/道具事件跑馬燈
+  (r.ghostNotes||[]).forEach((g,i)=>{
+    const d=document.createElement('div');d.className='toast';d.textContent=g.icon+' '+g.text;
+    $('revtoasts').appendChild(d);
+    rvT(()=>d.classList.add('in'),t+i*350);
+  });
+  t+=(r.ghostNotes||[]).length*350+300;
+  // ④ 老闆手電筒＋主管蓋章
+  (r.bossZoneKeys||[]).forEach(k=>{rvT(()=>{const z=$('rz_'+k),s=$('st_'+k);if(z)z.classList.add('inspected');if(s){s.textContent='🔦';s.classList.add('in');}},t);});
+  if(r.supZoneKey){rvT(()=>{const z=$('rz_'+r.supZoneKey),s=$('st_'+r.supZoneKey);if(z)z.classList.add('inspected');if(s){s.textContent=(s.textContent||'')+'🕵️';s.classList.add('in');}},t+250);}
+  t+=1100;
+  // ⑤ 個人結果：震動／飄分／特效
+  r.results.forEach((x,i)=>{
+    rvT(()=>{
+      const el=$('rc_'+i);if(!el)return;
+      const[txt,color]=outcomeIcon(x);
+      if(x.caught===true)el.classList.add('caught');
+      else if(x.gain!=null)el.classList.add('safe2');
+      const f=document.createElement('span');f.className='float go '+color;f.textContent=txt;
+      el.appendChild(f);
+      if(x.eliminated)rvT(()=>{el.classList.add('dead');el.innerHTML='👻 '+esc(x.name);},900);
+    },t+i*220);
+  });
+  t+=n*220+700;
+  // ⑥ 一行式戰果總結
+  rvT(()=>{
+    $('revsum').innerHTML=`<div class="sumline in" style="justify-content:center;color:var(--muted)">🔦 ${r.bossZones.join('、')||'沒巡'}${r.supZone?'｜🕵️ '+r.supZone:''}｜📋 ${r.rate}%</div>`
+      +r.results.map((x,i)=>{const[txt,color]=outcomeIcon(x);
+      return `<div class="sumline" id="sl_${i}"><span class="sn">${x.supervisor?'🕵️':(x.seniority==='senior'?'🦉':'🐣')} ${esc(x.name)}</span><span style="color:var(--muted)">${ZI[x.zone]||'🏢'}</span><span class="si ${color}">${txt}</span></div>`;}).join('');
+    r.results.forEach((x,i)=>rvT(()=>{const s=$('sl_'+i);if(s)s.classList.add('in');},i*120));
+  },t);
 }
 function renderEnd(){
   const w=ST.winner;
@@ -455,6 +600,10 @@ const RULES_BODY=`
 <p>🐣 菜鳥：摸魚 +1 分，但老闆巡到<b>隔壁區也會抓到你</b>。🦉 老鳥：摸魚 −1 分，但有一張<b>免死金牌</b>、要被連盯兩回合才抓得到。</p>
 <h4>📋 工作（拿到任務時）</h4>
 <p>認真做（+2 進度、安全）｜ 邊做邊摸（+1 進度、有分但被抓算怠工）｜ 擺爛（易逾期）。做完任務額外 +1 分。</p>
+<h4>🃏 手牌（開局發 2 張，完成任務再抽）</h4>
+<p>🗣️ <b>藉口卡</b>：被抓時自動使用，這次不算也不加心悸。道具卡要在選動作前點選：🧃提神飲料（心悸 −2）｜🖨️影印機卡紙（老闆少巡一區）｜💪雞精加持（摸魚成功 +2 分）。</p>
+<h4>👻 出局變幽靈（不是坐板凳）</h4>
+<p>出局後每 2 回合可作祟一次：<b>騷擾老闆</b>（隨機少巡一區）｜<b>打斷協查</b>（主管白跑）｜<b>通風報信</b>（救一位快被抓的同事）。</p>
 <h4>📏 兩條限制</h4>
 <p>員工不能連兩回合待同一摸魚區；老闆不能連查同一地方三次。</p>
 <h4>🏆 獲勝條件</h4>

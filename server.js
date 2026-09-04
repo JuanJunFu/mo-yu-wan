@@ -1,4 +1,4 @@
-// 摸魚王 · 線上房間遊戲（Phase 3：升職陷阱主管 + 老鳥罩學弟 + 資遣；含 Phase2 任務系統與綜合評分）
+// 摸魚王 · 線上房間遊戲（Phase 4：幽靈行動 + 藉口/道具手牌；含 Phase3 主管/罩學弟/資遣、Phase2 任務系統與綜合評分）
 const express = require('express');
 const http = require('http');
 const https = require('https');
@@ -30,6 +30,9 @@ const PROMOTE_COOLDOWN = 3;   // 升職令冷卻
 const SUPERVISOR_TERM = 2;    // 主管任期
 const HELP_COOLDOWN = 2;      // 老鳥罩學弟冷卻
 const BOSS_FIRES = 2;         // 老闆每局資遣次數（管理點）
+const GHOST_COOLDOWN = 2;     // 幽靈行動冷卻（每 2 回合可作祟一次）
+const START_HAND = 2;         // 開局手牌
+const HAND_LIMIT = 3;         // 手牌上限
 const MAX_ROOMS = 10;               // 房間總數上限（防濫用閥；單機記憶體實際撐得更多）
 const LOBBY_IDLE_MS = 30*60*1000;   // 等待中房間閒置 30 分回收
 const ENDED_IDLE_MS = 5*60*1000;    // 遊戲結束後 5 分回收
@@ -41,6 +44,28 @@ const TASKS = [
   '找五年前沒人記得檔名的檔案','改簡報第 38 版','教主管用新系統','整理 900 個「新增資料夾」',
   '回一星負評要有溫度','幫老闆搶演唱會票','寫道歉信給奧客','統計午餐問卷',
 ];
+
+// 藉口/道具卡：藉口＝被抓時自動觸發；道具＝暗選時出牌、結算時生效
+const CARD_DEFS = {
+  excuse: { icon:'🗣️', kind:'passive', desc:'被抓時自動使用：這次不算、不加心悸' },
+  energy: { icon:'🧃', kind:'item', name:'提神飲料', desc:'出牌：本回合結算心悸 −2' },
+  jam:    { icon:'🖨️', kind:'item', name:'影印機卡紙', desc:'出牌：老闆本回合隨機少巡一區' },
+  boost:  { icon:'💪', kind:'item', name:'雞精加持', desc:'出牌：本回合摸魚成功分數 +2' },
+};
+const EXCUSE_NAMES = ['肚子痛先閃','幫客戶送件','電腦當機重開','去修印表機','幫老闆買咖啡','量個體溫'];
+function buildCardDeck(){
+  const deck = [];
+  for (const n of EXCUSE_NAMES) deck.push({ type:'excuse', name:n });
+  for (let i=0;i<4;i++) deck.push({ type:'energy', name:CARD_DEFS.energy.name });
+  for (let i=0;i<3;i++) deck.push({ type:'jam', name:CARD_DEFS.jam.name });
+  for (let i=0;i<4;i++) deck.push({ type:'boost', name:CARD_DEFS.boost.name });
+  return deck;
+}
+function drawCard(room, p){
+  if (!room.cardDeck.length || p.hand.length >= HAND_LIMIT) return null;
+  const c = room.cardDeck.shift(); p.hand.push(c); return c;
+}
+const GHOST_ACTIONS = { haunt:'👻 騷擾老闆', warn:'📞 通風報信', disrupt:'🌀 打斷協查' };
 
 const rooms = new Map();
 
@@ -58,7 +83,8 @@ function lobbySnapshot(){
 }
 function mkPlayer(socket,name){ return { id:socket.id, socket, name, connected:true, role:null, seniority:null,
   alive:true, isGhost:false, slackCount:0, points:0, anxiety:0, immunity:0, lastZone:null, task:null,
-  isSupervisor:false, supTermLeft:0, helpCooldown:0, canBeFired:false, voiceOn:false }; }
+  isSupervisor:false, supTermLeft:0, helpCooldown:0, canBeFired:false, voiceOn:false,
+  hand:[], ghostCooldown:0 }; }
 function bossOf(room){ for(const p of room.players.values()) if(p.role==='boss') return p; return null; }
 function aliveEmps(room){ return [...room.players.values()].filter(p=>p.role==='emp'&&p.alive); }
 
@@ -89,6 +115,10 @@ function viewFor(room, pid){
       task: me.task ? {name:me.task.name,progress:me.task.progress,need:me.task.need,deadlineLeft:me.task.deadlineLeft,state:me.task.state} : null,
       submitted: me.role==='boss' ? room.choices.boss!=null : (room.choices.emp[me.id]!=null),
       isHost: me.id===room.hostId,
+      hand: me.hand.map(c=>({type:c.type, name:c.name, icon:CARD_DEFS[c.type].icon, kind:CARD_DEFS[c.type].kind, desc:CARD_DEFS[c.type].desc})),
+      ghostCooldown: me.ghostCooldown,
+      ghostActed: !!(room.choices.ghost&&room.choices.ghost[me.id]),
+      ghostTargets: (me.isGhost&&room.phase==='choosing') ? aliveEmps(room).map(e=>({id:e.id,name:e.name})) : [],
       // 老鳥可罩的學弟（本回未在冷卻）
       juniors: (me.role==='emp'&&me.seniority==='senior'&&me.helpCooldown===0&&!me.isSupervisor)
         ? aliveEmps(room).filter(e=>e.seniority==='junior'&&!e.isSupervisor).map(e=>({id:e.id,name:e.name})) : [],
@@ -128,7 +158,10 @@ function startGame(room, opts){
     p.seniority=p.role==='emp'?(seniorSet.has(p.id)?'senior':'junior'):null;
     p.alive=true; p.isGhost=false; p.slackCount=0; p.points=0; p.anxiety=0; p.lastZone=null; p.task=null;
     p.immunity=(p.seniority==='senior')?1:0; p.isSupervisor=false; p.supTermLeft=0; p.helpCooldown=0; p.canBeFired=false;
+    p.hand=[]; p.ghostCooldown=0;
   }
+  room.cardDeck=shuffle(buildCardDeck());
+  for(let i=0;i<START_HAND;i++) for(const p of room.players.values()) if(p.role==='emp') drawCard(room,p);
   const n=ids.length;
   room.config.rounds=opts.rounds||(n<=3?6:8);
   room.config.bossInspect=(n<=3)?2:1;
@@ -143,12 +176,12 @@ function startGame(room, opts){
 }
 
 function enterAdmin(room){
-  room.phase='admin'; room.choices={emp:{},boss:null};
+  room.phase='admin'; room.choices={emp:{},boss:null,ghost:{}};
   log(room, `— 第 ${room.round} 回合：老闆行政（派工作／升職／資遣）—`);
   startTimer(room, ADMIN_SEC, ()=>{ enterChoose(room); broadcast(room); });
 }
 function enterChoose(room){
-  room.phase='choosing'; room.choices={emp:{},boss:null};
+  room.phase='choosing'; room.choices={emp:{},boss:null,ghost:{}};
   startTimer(room, CHOOSE_SEC, ()=>{
     for(const e of aliveEmps(room)) if(room.choices.emp[e.id]==null) room.choices.emp[e.id]= e.isSupervisor?{action:'supervise',zone:null}:{action:'idle',zone:'office'};
     if(room.choices.boss==null) room.choices.boss={zones:[]};
@@ -160,12 +193,43 @@ function enterChoose(room){
 function resolveRound(room){
   clearTimer(room);
   const emps=aliveEmps(room);
-  const bossZones=(room.choices.boss&&room.choices.boss.zones)||[];
+  const bossZones=[...((room.choices.boss&&room.choices.boss.zones)||[])];
   const choiceOf=e=>room.choices.emp[e.id]||(e.isSupervisor?{action:'supervise',zone:null}:{action:'idle',zone:'office'});
 
   // 主管協查區
   const sup=room.supervisorId?room.players.get(room.supervisorId):null;
-  const supZone = (sup&&sup.alive&&sup.isSupervisor) ? (choiceOf(sup).zone||null) : null;
+  let supZone = (sup&&sup.alive&&sup.isSupervisor) ? (choiceOf(sup).zone||null) : null;
+
+  // ① 幽靈行動先套用（改變巡查版圖）
+  const ghostNotes=[]; const warnedSet=new Set();
+  for(const [gid,ga] of Object.entries(room.choices.ghost||{})){
+    const g=room.players.get(gid); if(!g||!g.isGhost||g.ghostCooldown>0) continue;
+    if(ga.type==='haunt'&&bossZones.length){
+      const rm=bossZones.splice(Math.floor(Math.random()*bossZones.length),1)[0];
+      ghostNotes.push({icon:'👻',text:`幽靈【${g.name}】作祟，老闆的【${ZONES[rm].name}】巡查泡湯`});
+    } else if(ga.type==='disrupt'&&supZone){
+      ghostNotes.push({icon:'🌀',text:`幽靈【${g.name}】打斷了主管協查`}); supZone=null;
+    } else if(ga.type==='warn'&&ga.targetId&&room.players.has(ga.targetId)){
+      warnedSet.add(ga.targetId);
+      ghostNotes.push({icon:'📞',text:'有幽靈偷偷通風報信…'});
+    } else continue;
+    g.ghostCooldown=GHOST_COOLDOWN;
+  }
+
+  // ② 道具出牌（結算期生效；出牌即消耗）
+  const energyOf={}, boostSet=new Set();
+  for(const e of emps){
+    const ch=choiceOf(e); if(ch.cardIdx==null) continue;
+    const c=e.hand[ch.cardIdx]; if(!c||CARD_DEFS[c.type].kind!=='item') continue;
+    e.hand.splice(ch.cardIdx,1);
+    if(c.type==='energy'){ energyOf[e.id]=2; ghostNotes.push({icon:'🧃',text:`【${e.name}】灌了提神飲料（心悸 −2）`}); }
+    else if(c.type==='boost'){ boostSet.add(e.id); ghostNotes.push({icon:'💪',text:`【${e.name}】雞精加持（摸魚成功 +2 分）`}); }
+    else if(c.type==='jam'&&bossZones.length){
+      const rm=bossZones.splice(Math.floor(Math.random()*bossZones.length),1)[0];
+      ghostNotes.push({icon:'🖨️',text:`【${e.name}】搞了影印機卡紙，老闆的【${ZONES[rm].name}】巡查泡湯`});
+    }
+  }
+
   const inspected=new Set(bossZones); if(supZone) inspected.add(supZone);
 
   // 老鳥罩學弟：juniorId -> true（被罩）
@@ -181,31 +245,36 @@ function resolveRound(room){
   const results=[]; let safeCount=0;
 
   for(const e of emps){
-    const ch=choiceOf(e); const r={name:e.name, seniority:e.seniority, note:''};
+    const ch=choiceOf(e); const r={name:e.name, seniority:e.seniority, note:'', zone:'office'};
+    if(energyOf[e.id]) pending[e.id]-=energyOf[e.id];
     if(e.isSupervisor){
-      r.zoneName='主管巡查'; r.supervisor=true;
+      r.zoneName='主管巡查'; r.supervisor=true; r.zone=supZone||'office';
       if(e.task){ e.task.progress+=1; }
       r.note = supZone ? `主管，協查【${ZONES[supZone].name}】（免疫被抓）` : '主管，未協查（免疫被抓）';
       e.lastZone='office';
     } else if(ch.action==='work'){
-      safeCount++; r.zoneName='認真工作'; pending[e.id]-=1; e.points=Math.max(0,e.points-1);
+      safeCount++; r.zoneName='認真工作'; r.working=true; pending[e.id]-=1; e.points=Math.max(0,e.points-1);
       if(e.task){ e.task.progress+=2; r.note=`認真工作：任務 +2（${e.task.progress}/${e.task.need}）、心悸 −1、分數 −1`; } else r.note='認真工作：心悸 −1、分數 −1';
       e.lastZone='office';
     } else if(ch.action==='idle'||ch.zone==='office'){
       safeCount++; r.zoneName='辦公室'; pending[e.id]-=1; r.note='回辦公室休息（安全、不算摸魚、心悸 −1）'; e.lastZone='office';
     } else {
-      const zone=ch.zone, z=ZONES[zone]; r.zoneName=z.name;
+      const zone=ch.zone, z=ZONES[zone]; r.zoneName=z.name; r.zone=zone;
       let caught=inspected.has(zone);
       if(!caught && e.seniority==='junior'){ for(const adj of (ADJ[zone]||[])) if(inspected.has(adj)){caught=true;break;} }
       if(caught){
-        if(guarded.has(e.id)){ r.caught='guarded'; r.note='被抓，但老鳥罩學弟擋下了！'; }
+        const exIdx=e.hand.findIndex(c=>c.type==='excuse');
+        if(exIdx>=0){ const c=e.hand.splice(exIdx,1)[0]; r.caught='excused'; r.note=`被抓，但掏出藉口「${c.name}」滑走了！`; }
+        else if(warnedSet.has(e.id)){ r.caught='warned'; r.note='被抓前收到幽靈報信，及時溜回座位！'; }
+        else if(guarded.has(e.id)){ r.caught='guarded'; r.note='被抓，但老鳥罩學弟擋下了！'; }
         else if(e.seniority==='senior'&&e.immunity>0){ e.immunity--; r.caught='blocked'; r.note='被抓，但免死金牌擋下！'; }
-        else { const anx=(e.seniority==='junior')?3:2; pending[e.id]+=anx; r.caught=true; r.note=`被逮到！這次不算，心悸 +${anx}`;
+        else { const anx=(e.seniority==='junior')?3:2; pending[e.id]+=anx; r.caught=true; r.anx=anx; r.note=`被逮到！這次不算，心悸 +${anx}`;
           // 主管檢舉獎金：若在主管協查區被抓
           if(supZone&&zone===supZone&&sup){ sup.points+=2; r.byBoss=false; log(room,`🕵️ 主管【${sup.name}】協查抓到【${e.name}】(+2 分)`); }
         }
       } else {
         let gain=z.slack+(e.seniority==='senior'?-1:1); if(gain<0)gain=0;
+        if(boostSet.has(e.id)) gain+=2;
         e.slackCount++; e.points+=gain; pending[e.id]+=z.anxiety; r.gain=gain;
         r.note=`摸魚成功！次數 +1（分 +${gain}，心悸 +${z.anxiety}）`;
         if(e.task){ e.task.progress+=1; r.note+=`；邊做邊摸 任務 +1（${e.task.progress}/${e.task.need}）`; }
@@ -218,7 +287,9 @@ function resolveRound(room){
   // 任務完成 / 逾期（兩段式）
   for(const e of emps){
     if(!e.task) continue; const t=e.task;
-    if(t.progress>=t.need){ room.tasksDone++; e.points+=1; log(room,`✅【${e.name}】完成「${t.name}」(+1 分)`); e.task=null; }
+    if(t.progress>=t.need){ room.tasksDone++; e.points+=1;
+      const c=drawCard(room,e);
+      log(room,`✅【${e.name}】完成「${t.name}」(+1 分${c?'、抽 1 張卡':''})`); e.task=null; }
     else { t.deadlineLeft--;
       if(t.deadlineLeft<=0){
         if(t.state!=='grace'){ t.state='grace'; t.deadlineLeft=1; log(room,`⏳【${e.name}】任務到期，給一回合補交`); }
@@ -239,11 +310,13 @@ function resolveRound(room){
   if(sup&&sup.isSupervisor){ sup.supTermLeft--; if(sup.supTermLeft<=0){ sup.isSupervisor=false; room.supervisorId=null; log(room,`【${sup.name}】主管任期結束，回歸員工`); } }
   if(room.promoteCooldown>0) room.promoteCooldown--;
   for(const e of emps) if(e.helpCooldown>0) e.helpCooldown--;
+  for(const p of room.players.values()) if(p.isGhost&&p.ghostCooldown>0) p.ghostCooldown--;
 
   // 老闆連查限制
   const ns={}; for(const z of Object.keys(ZONES)) ns[z]=bossZones.includes(z)?((room.zoneStreak[z]||0)+1):0; room.zoneStreak=ns;
 
-  room.lastReveal={ round:room.round, bossZones:bossZones.map(z=>ZONES[z].name), supZone: supZone?ZONES[supZone].name:null, results,
+  room.lastReveal={ round:room.round, bossZones:bossZones.map(z=>ZONES[z].name), bossZoneKeys:bossZones,
+    supZone: supZone?ZONES[supZone].name:null, supZoneKey:supZone||null, ghostNotes, results,
     rate: room.tasksIssued>0?Math.round(room.tasksDone/room.tasksIssued*100):0 };
   log(room, `第 ${room.round} 回合：老闆查 ${bossZones.map(z=>ZONES[z].name).join('、')||'（無）'}${supZone?`｜主管協查 ${ZONES[supZone].name}`:''}。完成率 ${room.lastReveal.rate}%。`);
   room.phase='reveal';
@@ -305,7 +378,7 @@ io.on('connection', (socket)=>{
     const room={ code, name:roomName, password:password||null, createdAt:Date.now(), lastActivity:Date.now(),
       spectators:new Map(), hostId:socket.id, players:new Map(), phase:'lobby', round:0,
       config:{rounds:8,bossInspect:1,anxietyOut:ANXIETY_OUT_DEFAULT,completeThreshold:0.7},
-      choices:{emp:{},boss:null}, taskDeck:[], tasksIssued:0, tasksDone:0, zoneStreak:{}, log:[], winner:null,
+      choices:{emp:{},boss:null,ghost:{}}, taskDeck:[], cardDeck:[], tasksIssued:0, tasksDone:0, zoneStreak:{}, log:[], winner:null,
       supervisorId:null, promoteCooldown:0, bossFires:BOSS_FIRES, _timer:null, timerEndsAt:null };
     room.players.set(socket.id, mkPlayer(socket,name)); rooms.set(code,room);
     socket.join(code); socket.data.roomCode=code; log(room,`【${name}】開了房間 ${code}`);
@@ -428,7 +501,21 @@ io.on('connection', (socket)=>{
 
   socket.on('submitChoice', (payload, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='choosing') return;
-    const me=room.players.get(socket.id); if(!me||!me.alive) return;
+    const me=room.players.get(socket.id); if(!me) return;
+    if(!me.alive){
+      // 幽靈行動（不擋結算節奏；沒出就跳過）
+      if(!me.isGhost) return;
+      const ga=payload&&payload.ghostAction;
+      if(!ga||!GHOST_ACTIONS[ga.type]) return cb&&cb({error:'無效的幽靈行動'});
+      if(me.ghostCooldown>0) return cb&&cb({error:`幽靈行動冷卻中（還 ${me.ghostCooldown} 回）`});
+      if(room.choices.ghost[me.id]) return cb&&cb({error:'本回合已作祟過了'});
+      if(ga.type==='warn'){
+        const t=room.players.get(ga.targetId);
+        if(!t||t.role!=='emp'||!t.alive) return cb&&cb({error:'報信對象無效'});
+      }
+      room.choices.ghost[me.id]={type:ga.type, targetId:ga.targetId||null};
+      cb&&cb({ok:true}); broadcast(room); return;
+    }
     if(me.role==='boss'){
       const picks=(payload.zones||[]).filter(z=>ZONES[z]&&z!=='office');
       if(picks.length!==room.config.bossInspect) return cb&&cb({error:`請選 ${room.config.bossInspect} 個要查的地方`});
@@ -439,11 +526,18 @@ io.on('connection', (socket)=>{
       room.choices.emp[socket.id]={action:'supervise', zone: zone||null};
     } else {
       const action=payload.action; const helpTarget=payload.helpTarget||null;
-      if(action==='work'||action==='idle') room.choices.emp[socket.id]={action,zone:'office',helpTarget};
+      let cardIdx=null;
+      if(payload.cardIdx!=null){
+        const c=me.hand[payload.cardIdx];
+        if(!c) return cb&&cb({error:'沒有這張手牌'});
+        if(CARD_DEFS[c.type].kind!=='item') return cb&&cb({error:'藉口卡不用出，被抓時會自動使用'});
+        cardIdx=payload.cardIdx;
+      }
+      if(action==='work'||action==='idle') room.choices.emp[socket.id]={action,zone:'office',helpTarget,cardIdx};
       else if(action==='slack'){ const zone=payload.zone;
         if(!ZONES[zone]||zone==='office') return cb&&cb({error:'請選一個摸魚區'});
         if(me.lastZone===zone) return cb&&cb({error:`上回合已在「${ZONES[zone].name}」，換地方`});
-        room.choices.emp[socket.id]={action:'slack',zone,helpTarget};
+        room.choices.emp[socket.id]={action:'slack',zone,helpTarget,cardIdx};
       } else return cb&&cb({error:'無效動作'});
     }
     cb&&cb({ok:true});
@@ -460,9 +554,9 @@ io.on('connection', (socket)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||socket.id!==room.hostId) return;
     clearTimer(room); touch(room);
     for(const [id,p] of room.players) if(!p.connected) room.players.delete(id); // 再玩一局時剔除離線者
-    room.phase='lobby'; room.round=0; room.winner=null; room.choices={emp:{},boss:null};
+    room.phase='lobby'; room.round=0; room.winner=null; room.choices={emp:{},boss:null,ghost:{}};
     room.tasksIssued=0; room.tasksDone=0; room.supervisorId=null; room.promoteCooldown=0; room.bossFires=BOSS_FIRES;
-    for(const p of room.players.values()){ p.role=null;p.seniority=null;p.alive=true;p.isGhost=false;p.slackCount=0;p.points=0;p.anxiety=0;p.lastZone=null;p.task=null;p.immunity=0;p.isSupervisor=false;p.supTermLeft=0;p.helpCooldown=0;p.canBeFired=false; }
+    for(const p of room.players.values()){ p.role=null;p.seniority=null;p.alive=true;p.isGhost=false;p.slackCount=0;p.points=0;p.anxiety=0;p.lastZone=null;p.task=null;p.immunity=0;p.isSupervisor=false;p.supTermLeft=0;p.helpCooldown=0;p.canBeFired=false;p.hand=[];p.ghostCooldown=0; }
     log(room,'房主重開一局。'); broadcast(room);
   });
 
