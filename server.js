@@ -5,6 +5,7 @@ const https = require('https');
 const fs = require('fs');
 const { Server } = require('socket.io');
 const path = require('path');
+const QRCode = require('qrcode');
 
 const app = express();
 const io = new Server();
@@ -29,6 +30,9 @@ const PROMOTE_COOLDOWN = 3;   // 升職令冷卻
 const SUPERVISOR_TERM = 2;    // 主管任期
 const HELP_COOLDOWN = 2;      // 老鳥罩學弟冷卻
 const BOSS_FIRES = 2;         // 老闆每局資遣次數（管理點）
+const MAX_ROOMS = 10;               // 房間總數上限（防濫用閥；單機記憶體實際撐得更多）
+const LOBBY_IDLE_MS = 30*60*1000;   // 等待中房間閒置 30 分回收
+const ENDED_IDLE_MS = 5*60*1000;    // 遊戲結束後 5 分回收
 
 const TASKS = [
   '幫全辦公室買飲料（記 12 種客製）','印 500 頁報告（釘歪重印）','回一封「收到」CC 全公司',
@@ -45,6 +49,13 @@ function code4(){ const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s=''; for(let 
 function newRoomCode(){ let c; do{c=code4();}while(rooms.has(c)); return c; }
 function shuffle(a){ const b=[...a]; for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];} return b; }
 function log(room,msg){ room.log.push(msg); if(room.log.length>60)room.log.shift(); }
+function touch(room){ room.lastActivity=Date.now(); }
+function lobbySnapshot(){
+  return [...rooms.values()].sort((a,b)=>b.createdAt-a.createdAt).map(r=>({
+    code:r.code, name:r.name, players:r.players.size, max:6,
+    locked:!!r.password, inGame:r.phase!=='lobby',
+  }));
+}
 function mkPlayer(socket,name){ return { id:socket.id, socket, name, connected:true, role:null, seniority:null,
   alive:true, isGhost:false, slackCount:0, points:0, anxiety:0, immunity:0, lastZone:null, task:null,
   isSupervisor:false, supTermLeft:0, helpCooldown:0, canBeFired:false, voiceOn:false }; }
@@ -66,7 +77,7 @@ function viewFor(room, pid){
     submitted: room.phase==='choosing' ? (p.role==='boss' ? room.choices.boss!=null : (room.choices.emp[p.id]!=null)) : false,
   }));
   return {
-    code:room.code, phase:room.phase, round:room.round, rounds:room.config.rounds,
+    code:room.code, name:room.name||null, phase:room.phase, round:room.round, rounds:room.config.rounds,
     bossInspect:room.config.bossInspect, anxietyOut:room.config.anxietyOut, completeThreshold:room.config.completeThreshold,
     tasksIssued:room.tasksIssued, tasksDone:room.tasksDone, timerEndsAt:room.timerEndsAt||null, revealSkipAt:room.revealSkipAt||null,
     zones:ZONES, slackZones:SLACK_ZONES,
@@ -96,7 +107,11 @@ function viewFor(room, pid){
     winner: room.winner||null, log: room.log.slice(-14), zoneStreak: room.zoneStreak,
   };
 }
-function broadcast(room){ for(const p of room.players.values()){ if(p.connected&&p.socket) p.socket.emit('state', viewFor(room,p.id)); } }
+function broadcast(room){ for(const p of room.players.values()){ if(p.connected&&p.socket) p.socket.emit('state', viewFor(room,p.id)); }
+  if(room.spectators&&room.spectators.size){ const sd=specView(room); for(const s of room.spectators.values()) s.socket.emit('spec', sd); } }
+// 觀戰視角：只給文字流程，不含任何玩家暗選資訊
+function specView(room){ return { code:room.code, name:room.name||null, phase:room.phase, round:room.round,
+  rounds:room.config.rounds, players:room.players.size, log:room.log.slice(-30) }; }
 
 // ---------- 開局 ----------
 function startGame(room, opts){
@@ -251,7 +266,7 @@ function checkWin(room){
 }
 
 function endGame(room, side, reason, winnerEmpId){
-  clearTimer(room); room.phase='ended';
+  clearTimer(room); room.phase='ended'; touch(room);
   const th=room.config.anxietyOut;
   const emps=[...room.players.values()].filter(p=>p.role==='emp');
   const ranking=emps.map(p=>{
@@ -280,9 +295,15 @@ function advanceRound(room){ room.round++; enterAdmin(room); }
 io.on('connection', (socket)=>{
   socket.data.roomCode=null;
 
-  socket.on('createRoom', ({name}, cb)=>{
-    name=(name||'玩家').toString().slice(0,12); const code=newRoomCode();
-    const room={ code, hostId:socket.id, players:new Map(), phase:'lobby', round:0,
+  socket.on('createRoom', ({name, roomName, password}, cb)=>{
+    if(rooms.size>=MAX_ROOMS) return cb&&cb({error:`房間已滿（${MAX_ROOMS}/${MAX_ROOMS}），請稍後再試`});
+    name=(name||'玩家').toString().slice(0,12);
+    roomName=(roomName||'').toString().trim().slice(0,16)||`${name} 的房間`;
+    password=(password||'').toString().trim();
+    if(password&&!/^\d{4}$/.test(password)) return cb&&cb({error:'房間密碼須為 4 位數字'});
+    const code=newRoomCode();
+    const room={ code, name:roomName, password:password||null, createdAt:Date.now(), lastActivity:Date.now(),
+      spectators:new Map(), hostId:socket.id, players:new Map(), phase:'lobby', round:0,
       config:{rounds:8,bossInspect:1,anxietyOut:ANXIETY_OUT_DEFAULT,completeThreshold:0.7},
       choices:{emp:{},boss:null}, taskDeck:[], tasksIssued:0, tasksDone:0, zoneStreak:{}, log:[], winner:null,
       supervisorId:null, promoteCooldown:0, bossFires:BOSS_FIRES, _timer:null, timerEndsAt:null };
@@ -291,19 +312,50 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true,code,playerId:socket.id}); broadcast(room);
   });
 
-  socket.on('joinRoom', ({code,name}, cb)=>{
+  socket.on('joinRoom', ({code,name,password}, cb)=>{
     code=(code||'').toString().toUpperCase().trim(); name=(name||'玩家').toString().slice(0,12);
     const room=rooms.get(code);
     if(!room) return cb&&cb({error:'找不到房間'});
-    if(room.phase!=='lobby') return cb&&cb({error:'遊戲已開始，無法加入'});
-    if(room.players.size>=6) return cb&&cb({error:'房間已滿（最多 6 人）'});
+    if(room.phase!=='lobby') return cb&&cb({error:'遊戲已開始，無法加入', canSpectate:true});
+    if(room.players.size>=6) return cb&&cb({error:'房間已滿（最多 6 人）', canSpectate:true});
+    if(room.password){
+      const pwd=(password||'').toString().trim();
+      if(pwd!==room.password) return cb&&cb({error:pwd?'密碼錯誤':'此房間已上鎖', needPassword:true});
+    }
+    touch(room);
     room.players.set(socket.id, mkPlayer(socket,name)); socket.join(code); socket.data.roomCode=code;
     log(room,`【${name}】加入房間`); cb&&cb({ok:true,code,playerId:socket.id}); broadcast(room);
+  });
+
+  socket.on('listRooms', (cb)=>{ cb&&cb({ok:true, rooms:lobbySnapshot(), count:rooms.size, max:MAX_ROOMS}); });
+
+  socket.on('spectateRoom', ({code,password}, cb)=>{
+    code=(code||'').toString().toUpperCase().trim();
+    const room=rooms.get(code);
+    if(!room) return cb&&cb({error:'找不到房間'});
+    if(room.password){
+      const pwd=(password||'').toString().trim();
+      if(pwd!==room.password) return cb&&cb({error:pwd?'密碼錯誤':'此房間已上鎖', needPassword:true});
+    }
+    room.spectators.set(socket.id,{id:socket.id,socket});
+    socket.data.specCode=code;
+    cb&&cb({ok:true});
+    socket.emit('spec', specView(room));
+  });
+  socket.on('specLeave', ()=>{ const room=rooms.get(socket.data.specCode); if(room&&room.spectators) room.spectators.delete(socket.id); socket.data.specCode=null; });
+
+  // 邀請連結 QR Code（伺服器端產生，不經第三方服務）
+  socket.on('makeQR', ({text}, cb)=>{
+    if(typeof text!=='string'||text.length>300||!/^https?:\/\//.test(text)) return cb&&cb({error:'無效的連結'});
+    QRCode.toDataURL(text, {width:300, margin:1}, (e,dataUrl)=>{
+      cb&&cb(e?{error:'QR Code 產生失敗'}:{ok:true, dataUrl});
+    });
   });
 
   socket.on('startGame', (opts, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return;
     if(socket.id!==room.hostId) return cb&&cb({error:'只有房主能開始'});
+    touch(room);
     const res=startGame(room,opts||{}); if(res.error) return cb&&cb(res);
     cb&&cb({ok:true}); broadcast(room);
   });
@@ -382,7 +434,7 @@ io.on('connection', (socket)=>{
 
   socket.on('restart', ()=>{
     const room=rooms.get(socket.data.roomCode); if(!room||socket.id!==room.hostId) return;
-    clearTimer(room); room.phase='lobby'; room.round=0; room.winner=null; room.choices={emp:{},boss:null};
+    clearTimer(room); touch(room); room.phase='lobby'; room.round=0; room.winner=null; room.choices={emp:{},boss:null};
     room.tasksIssued=0; room.tasksDone=0; room.supervisorId=null; room.promoteCooldown=0; room.bossFires=BOSS_FIRES;
     for(const p of room.players.values()){ p.role=null;p.seniority=null;p.alive=true;p.isGhost=false;p.slackCount=0;p.points=0;p.anxiety=0;p.lastZone=null;p.task=null;p.immunity=0;p.isSupervisor=false;p.supTermLeft=0;p.helpCooldown=0;p.canBeFired=false; }
     log(room,'房主重開一局。'); broadcast(room);
@@ -400,6 +452,7 @@ io.on('connection', (socket)=>{
   socket.on('voice-signal', ({to,data})=>{ io.to(to).emit('voice-signal',{from:socket.id, data}); });
 
   socket.on('disconnect', ()=>{
+    const sr=rooms.get(socket.data.specCode); if(sr&&sr.spectators) sr.spectators.delete(socket.id);
     const room=rooms.get(socket.data.roomCode); if(!room) return;
     const me=room.players.get(socket.id); if(me){ if(me.voiceOn){ me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); } me.connected=false; log(room,`【${me.name}】離線`); }
     if(socket.id===room.hostId){ const others=[...room.players.values()].filter(p=>p.connected); if(others.length){ room.hostId=others[0].id; log(room,`房主離線，改由【${others[0].name}】接手`); } }
@@ -407,6 +460,25 @@ io.on('connection', (socket)=>{
     broadcast(room);
   });
 });
+
+// 閒置房回收：等待中 30 分沒動靜、或結束後 5 分 → 關房，讓 10 個名額流動
+setInterval(()=>{
+  const now=Date.now();
+  for(const room of rooms.values()){
+    const idle=now-(room.lastActivity||room.createdAt||now);
+    const expired=(room.phase==='lobby'&&idle>LOBBY_IDLE_MS)||(room.phase==='ended'&&idle>ENDED_IDLE_MS);
+    if(!expired) continue;
+    clearTimer(room);
+    for(const p of room.players.values()){
+      if(p.connected&&p.socket){
+        p.socket.emit('kicked',{reason:room.phase==='lobby'?'房間閒置超過 30 分鐘，已自動關閉':'遊戲已結束，房間已回收'});
+        p.socket.leave(room.code); p.socket.data.roomCode=null;
+      }
+    }
+    if(room.spectators) for(const s of room.spectators.values()){ s.socket.emit('kicked',{reason:'房間已關閉'}); s.socket.data.specCode=null; }
+    rooms.delete(room.code);
+  }
+}, 60*1000);
 
 const PORT=process.env.PORT||3000;
 const httpServer=http.createServer(app);

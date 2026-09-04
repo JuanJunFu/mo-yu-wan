@@ -82,19 +82,32 @@
     <div class="card">
       <h2>加入遊戲</h2>
       <label>你的暱稱</label><input id="name" maxlength="12" placeholder="輸入暱稱">
+      <div class="row2">
+        <div><label>房名（選填）</label><input id="roomname" maxlength="16" placeholder="週五摸魚團"></div>
+        <div><label>密碼（選填＝上鎖）</label><input id="roompwd" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="4 位數字"></div>
+      </div>
       <button onclick="doCreate()">開新房間（當房主）</button>
       <div class="row2" style="margin-top:12px">
         <input id="joincode" maxlength="4" placeholder="房間代碼" style="text-transform:uppercase">
         <button class="ghost" onclick="doJoin()" style="margin-top:0">加入房間</button>
       </div>
     </div>
+    <div class="card">
+      <h2>公開房間 <span id="roomcount" style="color:var(--muted);font-size:.8rem;font-weight:400"></span></h2>
+      <ul class="plist" id="roomlist"><li style="color:var(--muted)">載入中…</li></ul>
+      <button class="ghost" onclick="refreshRooms()">🔄 重新整理</button>
+    </div>
     <div class="hint">3～6 人。老闆派工作、員工邊做邊摸。撐到下班、摸魚最多的當摸魚王。</div>
     <div id="rules-home"></div>
   </div>
 
   <div id="s-lobby" class="hide">
-    <div class="card"><h2>房間代碼</h2><div class="code" id="roomcode">----</div>
-      <div class="hint">把這代碼給朋友加入。</div></div>
+    <div class="card"><h2>房間代碼 <span id="lobbyname" style="color:var(--muted);font-size:.85rem;font-weight:400"></span></h2><div class="code" id="roomcode">----</div>
+      <div class="hint">把這代碼給朋友加入，或直接分享連結（點了免輸房號密碼）。</div>
+      <div class="row2">
+        <button class="ghost" onclick="copyInvite()" style="margin-top:10px">🔗 複製邀請連結</button>
+        <button class="ghost" onclick="showQR()" style="margin-top:10px">📱 顯示 QR Code</button>
+      </div></div>
     <div class="card">
       <h2>玩家 <span id="pcount"></span></h2>
       <ul class="plist" id="lobbylist"></ul>
@@ -165,6 +178,15 @@
     <div class="card"><h2>紀錄</h2><div class="log" id="log"></div></div>
   </div>
 
+  <div id="s-spec" class="hide">
+    <div class="card">
+      <h2>👀 觀戰中 <span id="specname" style="color:var(--muted);font-size:.85rem;font-weight:400"></span></h2>
+      <div class="hint" id="specmeta"></div>
+      <div class="log" id="speclog" style="max-height:340px;margin-top:8px"></div>
+      <button class="ghost" onclick="leaveSpec()">離開觀戰</button>
+    </div>
+  </div>
+
   <div id="s-end" class="hide">
     <div class="card">
       <div class="banner" id="endbanner"></div>
@@ -173,6 +195,24 @@
       <ul class="plist" id="ranking"></ul>
       <div id="hostend" class="hide"><button onclick="sock.emit('restart')">再玩一局</button></div>
     </div>
+  </div>
+</div>
+
+<div id="qrmodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99;align-items:center;justify-content:center" onclick="hideQR()">
+  <div class="card" style="width:min(360px,92vw);text-align:center" onclick="event.stopPropagation()">
+    <h2>📱 掃碼直接進房</h2>
+    <div style="background:#fff;border-radius:10px;padding:10px;display:inline-block"><img id="qrimg" alt="QR Code" style="display:block;width:min(280px,70vw)"></div>
+    <div class="hint" id="qrhint"></div>
+    <button class="ghost" onclick="hideQR()">關閉</button>
+  </div>
+</div>
+
+<div id="pwdmodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:99;align-items:center;justify-content:center">
+  <div class="card" style="width:min(320px,90vw)">
+    <h2>🔒 這間房有上鎖</h2>
+    <input id="pwdinput" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="輸入 4 位數密碼">
+    <button onclick="pwdOk()">加入</button>
+    <button class="ghost" onclick="pwdCancel()">取消</button>
   </div>
 </div>
 
@@ -188,11 +228,66 @@
 const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null;
 const seg={bossmode:'host',senmode:'balanced',threshold:'mid'};
 function $(id){return document.getElementById(id)}
-function show(id){['s-home','s-lobby','s-game','s-end'].forEach(s=>$(s).classList.toggle('hide',s!==id))}
+function show(id){['s-home','s-lobby','s-game','s-end','s-spec'].forEach(s=>$(s).classList.toggle('hide',s!==id))}
 function err(m){$('err').textContent=m||''; if(m)setTimeout(()=>{if($('err').textContent===m)$('err').textContent=''},4000);}
 function setSeg(g,btn){seg[g]=btn.dataset.v;[...btn.parentNode.children].forEach(b=>b.classList.toggle('on',b===btn));}
-function doCreate(){const n=$('name').value.trim();if(!n)return err('請先輸入暱稱');sock.emit('createRoom',{name:n},r=>{if(r.error)return err(r.error);});}
-function doJoin(){const n=$('name').value.trim();const c=$('joincode').value.trim().toUpperCase();if(!n)return err('請輸入暱稱');if(!c)return err('請輸入代碼');sock.emit('joinRoom',{name:n,code:c},r=>{if(r.error)return err(r.error);});}
+let myPwd=null; // 開房/成功加入時記住密碼，供邀請連結使用
+function saveName(n){try{localStorage.setItem('moyu_name',n);}catch(e){}}
+function doCreate(){const n=$('name').value.trim();if(!n)return err('請先輸入暱稱');
+  const pwd=$('roompwd').value.trim();
+  if(pwd&&!/^\d{4}$/.test(pwd))return err('房間密碼須為 4 位數字');
+  sock.emit('createRoom',{name:n,roomName:$('roomname').value.trim(),password:pwd},r=>{if(r.error)return err(r.error);saveName(n);myPwd=pwd||null;});}
+function joinWith(code,password){const n=$('name').value.trim();if(!n)return err('請輸入暱稱');
+  sock.emit('joinRoom',{name:n,code,password},r=>{
+    if(r&&r.needPassword){err(r.error);askPwd(code,'join');return;}
+    if(r&&r.canSpectate){if(confirm(r.error+'\n要改用觀戰模式嗎？（只能看文字戰況）'))spectate(code,password);return;}
+    if(r&&r.error)return err(r.error);
+    saveName(n);myPwd=password||null;});}
+function doJoin(code,locked){code=((code||$('joincode').value.trim())+'').toUpperCase();
+  if(!code)return err('請輸入代碼');
+  if(!$('name').value.trim())return err('請輸入暱稱');
+  if(code===inviteRoom&&inviteKey){joinWith(code,inviteKey);return;}
+  if(locked){askPwd(code,'join');return;}
+  joinWith(code);}
+let pwdCtx=null;
+function askPwd(code,mode){pwdCtx={code,mode:mode||'join'};$('pwdinput').value='';$('pwdmodal').style.display='flex';setTimeout(()=>$('pwdinput').focus(),60);}
+function pwdCancel(){pwdCtx=null;$('pwdmodal').style.display='none';}
+function pwdOk(){const p=$('pwdinput').value.trim();if(!/^\d{4}$/.test(p))return err('密碼是 4 位數字');const c=pwdCtx;pwdCancel();if(!c)return;
+  if(c.mode==='spec')spectate(c.code,p);else joinWith(c.code,p);}
+function spectate(code,password){sock.emit('spectateRoom',{code,password},r=>{
+  if(r&&r.needPassword){err(r.error);askPwd(code,'spec');return;}
+  if(r&&r.error)return err(r.error);});}
+let SPEC=null;
+sock.on('spec',d=>{SPEC=d;renderSpec();});
+function renderSpec(){if(!SPEC)return;show('s-spec');
+  $('specname').textContent=SPEC.name?('🏷 '+SPEC.name):SPEC.code;
+  $('specmeta').textContent=(SPEC.phase==='lobby'?'等待開始':SPEC.phase==='ended'?'已結束':('第 '+SPEC.round+'/'+SPEC.rounds+' 回合'))+' · '+SPEC.players+' 位玩家';
+  $('speclog').innerHTML=(SPEC.log||[]).map(l=>`<div>${esc(l)}</div>`).join('');$('speclog').scrollTop=9e9;}
+function leaveSpec(){sock.emit('specLeave');SPEC=null;show('s-home');refreshRooms();}
+function inviteURL(){return location.origin+location.pathname+'?room='+ST.code+(myPwd?('&key='+myPwd):'');}
+function copyInvite(){if(!ST)return;
+  const u=inviteURL();
+  const p=(navigator.clipboard&&navigator.clipboard.writeText)?navigator.clipboard.writeText(u):Promise.reject();
+  p.then(()=>err('已複製邀請連結 ✅')).catch(()=>prompt('手動複製這個連結分享：',u));}
+function showQR(){if(!ST)return;
+  sock.emit('makeQR',{text:inviteURL()},r=>{
+    if(!r||r.error)return err((r&&r.error)||'QR Code 產生失敗');
+    $('qrimg').src=r.dataUrl;
+    $('qrhint').textContent='房間 '+ST.code+(myPwd?'（含密碼，掃了直接進）':'');
+    $('qrmodal').style.display='flex';});}
+function hideQR(){$('qrmodal').style.display='none';}
+function refreshRooms(){
+  sock.emit('listRooms',res=>{
+    if(!res||!res.ok)return;
+    $('roomcount').textContent=`（${res.count}/${res.max} 間）`;
+    $('roomlist').innerHTML=res.rooms.length?res.rooms.map(r=>
+      `<li><span>${r.locked?'🔒 ':''}${esc(r.name)} <span style="color:var(--muted);font-size:.8rem">${r.players}/${r.max} · ${r.inGame?'遊戲中':'等待中'}</span></span>`+
+      (r.inGame||r.players>=r.max?'':`<button style="width:auto;margin:0;padding:6px 12px" onclick="doJoin('${r.code}',${r.locked})">加入</button>`)+`</li>`).join('')
+      :'<li style="color:var(--muted)">目前沒有房間，開一間吧！</li>';
+  });
+}
+sock.on('kicked',({reason})=>{ST=null;show('s-home');err(reason||'房間已關閉');refreshRooms();});
+setInterval(()=>{if(!ST)refreshRooms();},5000);
 function doStart(){sock.emit('startGame',{bossMode:seg.bossmode,seniorityMode:seg.senmode,threshold:seg.threshold},r=>{if(r&&r.error)return err(r.error);});}
 function submitBoss(){if(bossPicks.length!==ST.bossInspect)return err('請選 '+ST.bossInspect+' 個地方');sock.emit('submitChoice',{zones:bossPicks},r=>{if(r&&r.error)return err(r.error);});}
 function chooseEmp(action,zone){sock.emit('submitChoice',{action,zone,helpTarget},r=>{if(r&&r.error)return err(r.error);});}
@@ -211,7 +306,8 @@ function render(){
   renderTimer(); $('log').innerHTML=(ST.log||[]).map(l=>`<div>${esc(l)}</div>`).join('');$('log').scrollTop=9e9;
 }
 function renderLobby(){
-  $('roomcode').textContent=ST.code; $('pcount').textContent='（'+ST.players.length+'/6）';
+  $('roomcode').textContent=ST.code; $('lobbyname').textContent=ST.name?('🏷 '+ST.name):'';
+  $('pcount').textContent='（'+ST.players.length+'/6）';
   $('lobbylist').innerHTML=ST.players.map(p=>`<li><span>${p.connected?'🟢':'⚪'} ${esc(p.name)} ${p.isHost?'<span class="tag t-host">房主</span>':''}</span></li>`).join('');
   const amHost=ST.you&&ST.you.isHost; $('hostpanel').classList.toggle('hide',!amHost); $('waithost').classList.toggle('hide',amHost);
 }
@@ -406,6 +502,18 @@ function updateVoiceInfo(){ $('voiceinfo').textContent = voiceActive ? ('🔊 �
 
 show('s-home');
 updateVoiceInfo();
+refreshRooms();
+
+// 邀請連結：?room=CODE&key=1234 → 免輸房號密碼；記得暱稱就直接自動進房
+const _qp=new URLSearchParams(location.search);
+const inviteRoom=(_qp.get('room')||'').toUpperCase();
+const inviteKey=_qp.get('key')||undefined;
+if(inviteRoom){
+  $('joincode').value=inviteRoom;
+  const saved=(function(){try{return localStorage.getItem('moyu_name')||'';}catch(e){return '';}})();
+  if(saved){$('name').value=saved;joinWith(inviteRoom,inviteKey);}
+  else err('受邀加入房間 '+inviteRoom+'：輸入暱稱後按「加入房間」');
+}
 </script>
 </body>
 </html>
