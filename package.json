@@ -1,0 +1,13 @@
+{
+  "name": "moyu-wang-online",
+  "version": "0.1.0",
+  "description": "摸魚王 online room-based multiplayer game (text MVP)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

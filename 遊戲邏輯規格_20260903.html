@@ -1,0 +1,252 @@
+<title>摸魚王線上版 · 遊戲邏輯規格</title>
+<style>
+  :root{--bg:#14110c;--ink:#f0e7d5;--muted:#a89a80;--line:#3a3428;--panel:#1e1a13;--panel2:#241f16;--kraft:#c9a86a;--kraft2:#a8894f;--wood:#2a2016;--red:#c0392b;--green:#6ea06a;--blue:#6a8fb0;--gold:#e0b84a;--purple:#a06ea0;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;line-height:1.7}
+  .wrap{max-width:940px;margin:0 auto;padding:34px 22px 90px}
+  h1{font-size:1.9rem;margin:0 0 4px}
+  .badge{display:inline-block;font-size:.72rem;padding:3px 12px;border-radius:99px;background:var(--kraft);color:#241c10;letter-spacing:1px;font-weight:800;margin-bottom:10px}
+  .sub{color:var(--muted)}
+  h2{font-size:1.25rem;margin:42px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line);color:var(--kraft)}
+  h2 .n{display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;background:var(--kraft);color:#241c10;border-radius:50%;font-size:.9rem;margin-right:8px;font-weight:900}
+  h3{font-size:1.02rem;color:var(--kraft2);margin:20px 0 6px}
+  p{margin:9px 0} ul,ol{margin:8px 0;padding-left:24px} li{margin:4px 0}
+  table{width:100%;border-collapse:collapse;font-size:.86rem;margin:8px 0}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:.76rem;background:var(--panel)}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  code,pre{font-family:ui-monospace,Consolas,monospace}
+  code{background:var(--wood);color:var(--kraft);padding:1px 6px;border-radius:4px;font-size:.85em}
+  pre{background:#0f0c07;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:.82rem;line-height:1.55;color:#d8cdb4}
+  pre .c{color:#7a8a6a} pre .k{color:var(--gold)} pre .s{color:#c99a6a}
+  .lead{background:var(--panel);border-left:4px solid var(--kraft);border-radius:0 10px 10px 0;padding:14px 18px}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 16px;margin:10px 0}
+  .box b{color:var(--kraft)}
+  .box.ok{border-left:4px solid var(--green)} .box.new{border-left:4px solid var(--blue)} .box.q{border-left:4px solid var(--gold)}
+  .phase{display:flex;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin:6px 0}
+  .phase .p{font-weight:800;color:var(--kraft);min-width:110px}
+  .tag{display:inline-block;font-size:.68rem;font-weight:800;padding:1px 8px;border-radius:99px;margin-left:6px}
+  .done{background:#26301f;color:#a8d69a} .todo{background:#33221a;color:#e0a06a} .part{background:#1f3340;color:#8fbcd6}
+  .note{font-size:.84rem;color:var(--muted)}
+  .scroll{overflow-x:auto}
+  footer{margin-top:44px;color:var(--muted);font-size:.8rem;border-top:1px solid var(--line);padding-top:14px}
+</style>
+<div class="wrap">
+  <span class="badge">實作級規格 · 把規則變成程式</span>
+  <h1>摸魚王線上版 · 遊戲邏輯規格 v1</h1>
+  <p class="sub">橋接：現有 MVP（簡單版核心）→ 目標 v2.1 全套進階邏輯。這份定義狀態機、資料模型、每角色每階段的合法動作、結算的精確順序、邊緣情況，以及分階段實作路線。伺服器權威（server-authoritative），客端只送意圖。</p>
+
+  <h2><span class="n">0</span>現況 vs 目標</h2>
+  <div class="scroll"><table>
+    <tr><th>機制</th><th>MVP 現況</th><th>v2.1 目標</th></tr>
+    <tr><td>地點猜心（員工躲/老闆查）</td><td>✅ 已做</td><td>沿用</td></tr>
+    <tr><td>心悸累積＋出局</td><td>✅ 已做（即時加）</td><td>改<b>回合末結算</b></td></tr>
+    <tr><td>職級 老鳥/菜鳥＋免死</td><td>✅ 已做</td><td>加「罩學弟」互助</td></tr>
+    <tr><td>被抓＝溫和版（不算+心悸）</td><td>✅ 已做</td><td>沿用；加藉口卡主動擋</td></tr>
+    <tr><td>摸魚次數過半＝贏</td><td>✅ 已做</td><td>改為與<b>任務完成率</b>並存的三方勝負</td></tr>
+    <tr><td>任務發派（邊做邊摸）</td><td>❌ 無</td><td>核心，要加</td></tr>
+    <tr><td>升職陷阱（主管）</td><td>❌ 無</td><td>要加</td></tr>
+    <tr><td>線人幽靈（出局後）</td><td>❌ 無（出局只觀戰）</td><td>要加</td></tr>
+    <tr><td>場景卡 / 藉口道具卡</td><td>❌ 無</td><td>要加</td></tr>
+  </table></div>
+
+  <h2><span class="n">1</span>狀態機（房間 phase）</h2>
+<pre><span class="c">// 房間生命週期</span>
+LOBBY ──startGame──▶ ROLE_ASSIGN ──▶ ROUND_LOOP ──(下班/全滅)──▶ ENDED ──restart──▶ LOBBY
+
+<span class="c">// ROUND_LOOP 內每回合的子階段（依序）</span>
+SCENE      <span class="c">// 翻場景卡，套用本回合修正（公開）</span>
+ADMIN      <span class="c">// 老闆行政：派任務、（可）發升職令指派主管</span>
+CHOOSE     <span class="c">// 全員同時暗選（員工:躲哪+出牌；老闆:巡哪；主管:協查）</span>
+RESOLVE    <span class="c">// 伺服器一次結算，產生 reveal</span>
+REVEAL     <span class="c">// 公開結果；房主按「下一回合」或計時自動 → 回 SCENE</span></pre>
+  <div class="box new"><b>同步點</b>：CHOOSE 是關鍵。伺服器偵測「所有存活員工 + 老闆 (+主管) 都已提交」→ 自動進 RESOLVE。加<b>每階段計時器</b>（預設 CHOOSE 45 秒）：逾時者套用預設動作（員工＝待辦公室、老闆＝不巡、主管＝不協查），避免有人掛機卡住全場。</div>
+
+  <h2><span class="n">2</span>資料模型</h2>
+<pre><span class="k">Room</span> {
+  code, hostId, phase, subPhase, round, config,
+  players: Map&lt;id, Player&gt;,
+  scene: SceneCard|null,            <span class="c">// 本回合場景</span>
+  choices: { emp:{id:{zone,action,cardPlayed}}, boss:{zones[],skill}, supervisor:{inspectZone} },
+  taskDeck[], sceneDeck[], bossSkills[],
+  zoneStreak:{zone:int},            <span class="c">// 老闆連查限制</span>
+  supervisorId|null, supervisorTermLeft:int,
+  promoteCooldown:int,              <span class="c">// 升職令冷卻（每3時段1次）</span>
+  lastReveal, winner, log[]
+}
+<span class="k">Player</span> {
+  id, name, connected, role:'boss'|'emp',
+  seniority:'senior'|'junior'|null,
+  alive, isGhost,                   <span class="c">// 出局→幽靈</span>
+  slackCount, points, anxiety, immunity,   <span class="c">// 免死次數</span>
+  lastZone, seniorHelpCooldown,     <span class="c">// 罩學弟冷卻</span>
+  hand:[Card],                      <span class="c">// 藉口/道具卡</span>
+  task: Task|null                   <span class="c">// 目前身上的任務</span>
+}
+<span class="k">Task</span> { id, name, need:4, deadlineLeft:3, progress:0, state:'active'|'done'|'overdue'|'graceUsed' }</pre>
+
+  <h2><span class="n">3</span>每回合精確流程</h2>
+  <ol>
+    <li><b>SCENE</b>：翻一張場景卡，設 <code>room.scene</code>，套用其本回合修正（見 §6.4）。廣播。</li>
+    <li><b>ADMIN（老闆）</b>：(a) 對沒有任務的員工<b>派任務</b>（從 taskDeck 抽，指定對象）；(b) 若 <code>promoteCooldown==0</code> 可發<b>升職令</b>指派主管，被指定者選接受/拒絕。設定完老闆按「進入本回合」。</li>
+    <li><b>CHOOSE（同時暗選）</b>：
+      <ul>
+        <li>員工：選 <code>zone</code> ＋ <code>action</code>（摸魚 / 認真工作 / 待命）＋可預備一張手牌（藉口留到被抓時、道具即時）。</li>
+        <li>老闆：選 <code>bossInspect</code> 個 zone（受連查限制）＋可出一張老闆技。</li>
+        <li>主管：選是否協查、協查哪區。</li>
+      </ul>
+      全提交或逾時 → RESOLVE。</li>
+    <li><b>RESOLVE</b>：跑 §5 演算法。</li>
+    <li><b>REVEAL</b>：廣播結果；檢查勝負；房主續行或計時自動。</li>
+  </ol>
+
+  <h2><span class="n">4</span>決策空間（誰在何時能做什麼）</h2>
+  <div class="scroll"><table>
+    <tr><th>角色</th><th>ADMIN</th><th>CHOOSE</th><th>RESOLVE 觸發</th></tr>
+    <tr><td>老闆</td><td>派任務、發升職令</td><td>選巡邏區、出老闆技</td><td>抓捕、（依技能）額外效果</td></tr>
+    <tr><td>員工(一般)</td><td>—（若被指派主管則回應）</td><td>躲區+動作+備牌；被抓時可出藉口卡</td><td>—</td></tr>
+    <tr><td>主管(暫時)</td><td>—</td><td>不能摸魚；選協查區；推任務只能認真</td><td>協查抓人</td></tr>
+    <tr><td>老鳥</td><td>—</td><td>每2回可「罩學弟」（擋抓/分1分/傳藉口）</td><td>免死自動擋第一次</td></tr>
+    <tr><td>幽靈(出局)</td><td>—</td><td>每回出一張幽靈行動（報信/騷擾）</td><td>影響老闆/主管</td></tr>
+  </table></div>
+
+  <h2><span class="n">5</span>結算演算法（順序至關重要）</h2>
+  <div class="box q"><b>為何順序重要</b>：桌遊靠人腦「同時」處理；程式必須定死先後，否則同一張藉口卡、同一次協查會算兩次或漏算。以下為權威順序。</div>
+<pre><span class="k">function</span> resolveRound(room):
+  emps = 存活員工
+  <span class="c">// 5.1 先蒐集本回合各區的「巡查來源」</span>
+  inspected = set(老闆bossZones) ∪ (主管協查區 if 有)
+  <span class="c">// 幽靈行動先套用（可能改變 inspected：少巡一區/打斷協查）</span>
+  applyGhostActions(room, inspected)
+
+  <span class="c">// 5.2 逐員工判定（不即時扣心悸，先記帳到 pendingAnxiety）</span>
+  for e in emps:
+    z = e.zone (預設 office)
+    if e.action == 認真工作:
+        e 安全；若有任務 progress += 2；gain=0
+    elif z == office:
+        安全；gain=0；officePeople++
+    else (摸魚/邊做邊摸):
+        caught = (z in inspected) 或 (菜鳥 且 相鄰(z) in inspected)
+        if caught:
+            <span class="c">// 藉口卡 &gt; 免死 &gt; 主管協查專屬(005場景無效藉口) 的優先序</span>
+            if 玩家出藉口卡 且 場景允許: 擋下，處理藉口效果
+            elif 老鳥 且 immunity&gt;0: immunity--; 擋下
+            else: e.caught=true; pendingAnxiety[e] += (菜鳥?3:2); gain=0
+                  if 有任務: 任務凍結(overdue)
+        if not caught:
+            gain = max(0, z.slack + (老鳥?-1:+1) + 場景加成)
+            e.slackCount++; e.points += gain; pendingAnxiety[e] += z.anxiety
+            if 有任務(邊做邊摸): progress += 1
+    e.lastZone = z
+
+  <span class="c">// 5.3 任務完成/逾期</span>
+  for e with task:
+    if task.progress &gt;= task.need: task.done; e.points+=1(交差獎勵)
+    elif task.deadlineLeft-1 &lt;= 0:
+        if task.state!='graceUsed': task.state='graceUsed'(給一次補交)   <span class="c">// v2.1</span>
+        else: 標記可資遣(老闆需棄一張技能卡才能執行)
+
+  <span class="c">// 5.4 同儕壓力（辦公室）→ 併入 pendingAnxiety</span>
+  for e in emps: pendingAnxiety[e] += (officePeople - (e在office?1:0))
+
+  <span class="c">// 5.5 回合末一次結算心悸 + 出局判定</span>  <span class="c">// v2.1 關鍵</span>
+  for e in emps:
+    e.anxiety += pendingAnxiety[e]
+    if e.anxiety &gt;= ANXIETY_OUT(4, 6人局3): eliminate(e) → isGhost=true
+
+  <span class="c">// 5.6 主管任期 / 升職冷卻遞減</span>
+  tickSupervisor(room); promoteCooldown = max(0, promoteCooldown-1)
+
+  buildReveal(); checkWin()</pre>
+
+  <h2><span class="n">6</span>各機制細節</h2>
+
+  <h3>6.1 職級（老鳥/菜鳥）</h3>
+  <ul>
+    <li>菜鳥：摸魚 gain +1；<b>相鄰區被巡也算被抓</b>；被抓 pendingAnxiety +3；起手手牌 -1。</li>
+    <li>老鳥：摸魚 gain -1；<code>immunity=1</code>（自動擋第一次被抓/資遣）；<b>連兩回合被同區盯上才真的抓到</b>（需追蹤 <code>bossLockOn[empId]=streak</code>）；每 2 回可「罩學弟」。</li>
+    <li>相鄰定義：<code>座位-影印-茶水-廁所-頂樓</code> 線性，首尾不相鄰。</li>
+  </ul>
+
+  <h3>6.2 任務系統（核心新增）</h3>
+  <table>
+    <tr><th>員工動作</th><th>任務進度</th><th>偷懶</th><th>風險</th></tr>
+    <tr><td>認真工作</td><td>+2</td><td>0</td><td>安全</td></tr>
+    <tr><td>邊做邊摸（去摸魚區且身上有任務）</td><td>+1</td><td>照常</td><td>被巡到=抓怠工、任務凍結</td></tr>
+    <tr><td>擺爛（去摸魚區但不理任務）</td><td>+0</td><td>照常</td><td>易逾期→補交→資遣</td></tr>
+  </table>
+  <p class="note">實作：<code>action='work'</code>→純推進；<code>action='slack'</code>且有task→邊做邊摸(+1)；<code>action='slack'</code>視為想賺分，是否推進任務由「是否在任務允許區」判定或簡化為一律+1。資遣採兩段：先 graceUsed，再需老闆棄技能卡。</p>
+
+  <h3>6.3 升職陷阱（主管）</h3>
+  <ul>
+    <li>老闆 ADMIN 階段、<code>promoteCooldown==0</code> 時可指派；被指定者接受→<code>supervisorId</code>、<code>supervisorTermLeft=2</code>、<code>promoteCooldown=3</code>；拒絕→該員 anxiety+1 且該回合強制認真。</li>
+    <li>主管在任：不能出摸魚；免疫被抓；CHOOSE 可選協查區，協查中該區摸魚員工→出局，主管 points+2。</li>
+    <li>tickSupervisor：每回 <code>supervisorTermLeft--</code>，歸零卸任。</li>
+  </ul>
+
+  <h3>6.4 場景卡（程式化效果）</h3>
+  <p>每張場景卡是一組「本回合修正旗標」。實作成 <code>applyScene(room, scene)</code> 設定 flags，結算時讀取：</p>
+  <div class="scroll"><table>
+    <tr><th>場景</th><th>程式效果（本回合 flag）</th></tr>
+    <tr><td>晨會中</td><td><code>bossCannotInspect=true</code>；<code>slackBonus=+1</code></td></tr>
+    <tr><td>稽核日</td><td><code>bossInspect+=1</code>；<code>allAnxiety+=1</code>；<code>taskNeed+=1</code></td></tr>
+    <tr><td>老闆外出</td><td><code>bossMode='remote'</code>（指定1人猜區才抓）；<code>cannotAssignTask=true</code></td></tr>
+    <tr><td>死線降臨</td><td><code>settleOverdueNow=true</code></td></tr>
+    <tr><td>突襲的老闆召喚(005)</td><td><code>excuseDisabled=true</code>；被抓即出局</td></tr>
+    <tr><td>團購手搖</td><td>全員 points+2；<code>nextRoundLockZone='office'</code></td></tr>
+    <tr><td>發薪日</td><td>全員 anxiety-1</td></tr>
+  </table></div>
+
+  <h3>6.5 藉口/道具卡</h3>
+  <ul>
+    <li>藉口卡：CHOOSE 時「備牌」，RESOLVE 判定被抓時自動嘗試觸發（除非 <code>excuseDisabled</code>）。</li>
+    <li>道具卡（通風報信=看老闆巡哪、影印機卡紙=老闆少巡一區…）：多為<b>即時效果</b>，於 CHOOSE 提交時或 RESOLVE 早期套用。</li>
+    <li>MVP 可先不做手牌，用「認真/摸魚」二選一；Phase 4 再加牌庫與抽補。</li>
+  </ul>
+
+  <h3>6.6 幽靈</h3>
+  <p>出局→<code>isGhost=true, alive=false</code>。每回 CHOOSE 可出一張幽靈行動：報信（把老闆巡區私訊給一名員工）/ 騷擾（<code>ghostReduceInspect</code> 少巡一區 / 打斷協查 / 使一張老闆技失效）。於 5.1 <code>applyGhostActions</code> 套用。</p>
+
+  <h2><span class="n">7</span>勝負判定</h2>
+<pre><span class="k">function</span> checkWin(room):
+  aliveEmps = 存活員工
+  <span class="c">// 1) 全滅 → 老闆完勝</span>
+  if aliveEmps.length == 0: end('boss','所有員工出局'); return
+  if round &gt;= rounds:                      <span class="c">// 下班</span>
+    <span class="c">// 2) 任務完成率達門檻 → 老闆業績勝</span>
+    rate = doneTasks / issuedTasks
+    if rate &gt;= threshold(標準0.7, 可調0.6~0.8): end('boss', '業績達標'); return
+    <span class="c">// 3) 否則員工陣營守住 → 摸魚王</span>
+    winner = max slackCount among aliveEmps (tie: 心悸少者)
+    end('emp', '摸魚王='+winner.name, winner.id)</pre>
+  <p class="note">MVP 目前只有「摸魚次數過半」單一條件；Phase 2 導入任務後改為此三方矩陣。</p>
+
+  <h2><span class="n">8</span>邊緣情況與同步</h2>
+  <ul>
+    <li><b>全提交偵測</b>：每次 submit 後檢查存活員工 + 老闆 (+主管) 是否到齊 → 觸發 RESOLVE。</li>
+    <li><b>逾時預設</b>：CHOOSE 計時器到 → 未提交者套預設（員工=辦公室、老闆=不巡、主管=不協查）。</li>
+    <li><b>斷線</b>：標 <code>connected=false</code>；其選擇用預設；重連以同名或 token 恢復（MVP 用 socket.id，Phase 5 改持久 token）。</li>
+    <li><b>房主離線</b>：移交給下一位在線者（已實作）。</li>
+    <li><b>平手</b>：摸魚次數同→比心悸少；再同→並列。</li>
+    <li><b>老闆也斷線</b>：暫停回合或指派代理；MVP 先暫停等重連。</li>
+  </ul>
+
+  <h2><span class="n">9</span>分階段實作路線圖</h2>
+  <div class="phase"><span class="p">Phase 1</span><span>簡單版核心（猜心/心悸/職級/溫和版/過半勝）</span><span class="tag done">已完成</span></div>
+  <div class="phase"><span class="p">Phase 2</span><span>回合末結算心悸 ＋ 任務系統（派任務/邊做邊摸/完成率）＋ 三方勝負矩陣</span><span class="tag todo">下一步</span></div>
+  <div class="phase"><span class="p">Phase 3</span><span>升職陷阱（主管指派/協查/背叛）＋ 老鳥「罩學弟」＋ 資遣兩段式</span><span class="tag todo">待做</span></div>
+  <div class="phase"><span class="p">Phase 4</span><span>幽靈行動 ＋ 藉口/道具手牌牌庫（抽補/主動出牌）</span><span class="tag todo">待做</span></div>
+  <div class="phase"><span class="p">Phase 5</span><span>場景卡全套 ＋ 計時器/斷線重連/持久 token ＋ 卡面美術替換文字</span><span class="tag todo">待做</span></div>
+  <div class="box ok"><b>建議先做 Phase 2</b>：任務系統是「進階版靈魂」的第一塊，也是把 MVP 從「純躲貓貓」變成「邊做邊摸」的關鍵。加完就有明顯的深度提升，且不需要牌庫/UI 大改。</div>
+
+  <h2><span class="n">10</span>要你拍板的設計問題</h2>
+  <div class="box q">
+    <p><b>Q1 回合節奏</b>：CHOOSE 要不要加倒數計時器（防掛機）？預設幾秒？（建議 45 秒，逾時套預設）</p>
+    <p><b>Q2 主管協查殺傷力</b>：協查抓到直接出局，會不會太強？可改為「該次不算+心悸+2」與一般被抓一致。</p>
+    <p><b>Q3 藉口卡</b>：Phase 4 才做手牌；在那之前老鳥免死是唯一防禦，可否接受？</p>
+    <p><b>Q4 完成率門檻</b>：線上預設用七成（0.7）？還是開房時讓房主選六～八成？</p>
+  </div>
+
+  <footer>《摸魚王》線上版遊戲邏輯規格 v1 · 2026-09-03。對應原始碼 05_線上遊戲/server.js（Phase 1）。規則母本＝01_規則書（現行）/摸魚王_遊戲手冊_v2.1正式版。</footer>
+</div>

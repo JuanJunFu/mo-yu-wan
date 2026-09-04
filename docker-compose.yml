@@ -1,0 +1,16 @@
+services:
+  moyu:
+    build: .
+    image: moyu-wang:latest
+    container_name: moyu-wang
+    # 用「預設 docker0 bridge (172.17)」而非自建網段：
+    #  - 不會建立新的 172.18/19… bridge 而撞掉主機路由（避免自斷線）
+    #  - 走 docker 發布埠，docker 會自動加防火牆/轉發規則 → 外部連得進來（host 模式不會）
+    network_mode: bridge
+    ports:
+      - "8088:3000"     # HTTP 遊戲
+      - "8443:3443"     # HTTPS 語音（自簽憑證，瀏覽器需點「繼續前往」）
+    environment:
+      - PORT=3000
+      - HTTPS_PORT=3443
+    restart: unless-stopped

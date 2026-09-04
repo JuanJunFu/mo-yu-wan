@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>摸魚王 · 線上房間</title>
+<style>
+  :root{--bg:#14110c;--ink:#f0e7d5;--muted:#a89a80;--line:#3a3428;--panel:#1e1a13;--kraft:#c9a86a;--kraft2:#a8894f;--red:#c0392b;--green:#6ea06a;--gold:#e0b84a;--blue:#6a8fb0}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;line-height:1.6}
+  .wrap{max-width:660px;margin:0 auto;padding:20px 14px 60px}
+  h1{font-size:1.9rem;margin:6px 0;text-align:center;letter-spacing:2px}
+  .jp{text-align:center;color:var(--kraft2);letter-spacing:4px;font-size:.8rem;margin-bottom:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
+  h2{color:var(--kraft);font-size:1.05rem;margin:0 0 10px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin:10px 0 4px}
+  input{width:100%;background:#141009;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:11px 12px;font-size:1.05rem;font-family:inherit}
+  button{background:var(--kraft);color:#241c10;border:0;border-radius:8px;padding:12px 16px;font-weight:800;cursor:pointer;font-family:inherit;font-size:1rem;width:100%;margin-top:10px}
+  button.ghost{background:#2a2016;color:var(--kraft);border:1px solid var(--kraft2)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .code{font-family:ui-monospace,Consolas,monospace;font-size:1.8rem;letter-spacing:4px;color:var(--gold);text-align:center;font-weight:900}
+  .plist{list-style:none;padding:0;margin:8px 0}
+  .plist li{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:#191510}
+  .tag{font-size:.7rem;font-weight:800;padding:1px 8px;border-radius:99px;margin-left:6px}
+  .t-boss{background:var(--red);color:#fff}.t-senior{background:var(--blue);color:#fff}.t-junior{background:var(--green);color:#fff}.t-host{background:var(--gold);color:#241c10}
+  .zones{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+  .zone{border:2px solid var(--kraft2);border-radius:10px;padding:11px 8px;text-align:center;cursor:pointer;background:#1c150d;user-select:none}
+  .zone.safe{border-color:var(--green)} .zone.work{border-color:var(--blue)}
+  .zone.sel{outline:3px solid var(--gold);background:#2a2213}
+  .zone .ic{font-size:1.5rem}.zone .nm{font-weight:800}.zone .m{font-size:.72rem;color:var(--muted)}
+  .me{display:flex;gap:12px;flex-wrap:wrap;font-size:.88rem;margin:6px 0;color:var(--muted)}
+  .me b{color:var(--ink)}
+  .status{text-align:center;color:var(--gold);font-weight:800;margin:8px 0}
+  .timer{text-align:center;font-family:ui-monospace,Consolas,monospace;font-size:1.3rem;font-weight:900;color:var(--gold)}
+  .timer.low{color:#e07a6a}
+  .task{background:#241f16;border:1px solid var(--kraft2);border-radius:10px;padding:10px 12px;margin:8px 0}
+  .task .bar{height:8px;background:#0f0c07;border-radius:6px;overflow:hidden;margin-top:6px}
+  .task .fill{height:100%;background:var(--blue)}
+  .log{font-size:.82rem;color:var(--muted);background:#191510;border-radius:8px;padding:10px;max-height:150px;overflow:auto}
+  .log div{padding:2px 0;border-bottom:1px solid #241f16}
+  .rev{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;background:#191510}
+  .rev.caught{border-color:var(--red)} .rev.ok{border-color:var(--green)} .rev.out{opacity:.55}
+  .banner{text-align:center;font-size:1.4rem;font-weight:900;color:var(--gold);margin:10px 0}
+  .grade{display:inline-flex;width:36px;height:36px;border-radius:8px;align-items:center;justify-content:center;font-weight:900;font-size:1.15rem;flex:0 0 auto}
+  .g-S{background:var(--gold);color:#241c10}.g-A{background:var(--green);color:#fff}.g-B{background:var(--blue);color:#fff}.g-C{background:#5a5348;color:#fff}
+  .ritem{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:#191510}
+  .ritem.king{border-color:var(--gold);background:#241f10}
+  .ritem .info{flex:1;min-width:0}.ritem .nm{font-weight:800}.ritem .ttl{font-size:.78rem;color:var(--muted)}
+  .ritem .comp{font-family:ui-monospace,Consolas,monospace;font-weight:900;font-size:1.3rem;color:var(--gold);flex:0 0 auto}
+  .bosscard{display:flex;align-items:center;gap:10px;border:1px solid var(--red);border-radius:10px;padding:10px 14px;margin:8px 0;background:#1c1310}
+  .bosscard .info{flex:1}.bosscard .nm{font-weight:800}
+  .hint{font-size:.8rem;color:var(--muted);text-align:center;margin-top:8px}
+  .rules{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 16px;margin:12px 0}
+  .rules summary{cursor:pointer;font-weight:800;color:var(--kraft);padding:14px 0;font-size:1.05rem;list-style:none}
+  .rules summary::-webkit-details-marker{display:none}
+  .rules summary::before{content:'▸ ';color:var(--kraft2)}
+  .rules[open] summary::before{content:'▾ '}
+  .rules .body{padding-bottom:14px}
+  .rules h4{color:var(--kraft2);margin:14px 0 4px;font-size:.95rem}
+  .rules p{font-size:.9rem;margin:6px 0}.rules ul{margin:6px 0;padding-left:20px}.rules li{font-size:.88rem;margin:3px 0}
+  .rules .win{border-left:3px solid var(--green);padding:2px 0 2px 10px;margin:6px 0;font-size:.9rem}
+  .rules .win.boss{border-left-color:var(--red)} .rules .win b{color:var(--gold)}
+  .rules .z{display:inline-block;font-size:.8rem;color:var(--muted)}
+  .err{color:#e07a6a;text-align:center;font-weight:700;min-height:20px}
+  .seg{display:flex;gap:6px;margin:4px 0}
+  .seg button{flex:1;margin:0;font-size:.82rem;padding:8px}
+  .seg button.on{outline:2px solid var(--gold)}
+  .hide{display:none}
+  .voicebar{position:fixed;left:0;right:0;bottom:0;background:#1c150d;border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:10px;align-items:center;justify-content:center;z-index:50}
+  .voicebar button{width:auto;margin:0;padding:8px 14px;font-size:.9rem}
+  .voicebar .vi{font-size:.82rem;color:var(--muted)}
+  .voicebar .mute{background:#2a2016;color:var(--kraft);border:1px solid var(--kraft2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>摸魚王</h1><div class="jp">サボり王 · 線上房間</div>
+  <div class="err" id="err"></div>
+
+  <div id="s-home">
+    <div class="card">
+      <h2>加入遊戲</h2>
+      <label>你的暱稱</label><input id="name" maxlength="12" placeholder="輸入暱稱">
+      <button onclick="doCreate()">開新房間（當房主）</button>
+      <div class="row2" style="margin-top:12px">
+        <input id="joincode" maxlength="4" placeholder="房間代碼" style="text-transform:uppercase">
+        <button class="ghost" onclick="doJoin()" style="margin-top:0">加入房間</button>
+      </div>
+    </div>
+    <div class="hint">3～6 人。老闆派工作、員工邊做邊摸。撐到下班、摸魚最多的當摸魚王。</div>
+    <div id="rules-home"></div>
+  </div>
+
+  <div id="s-lobby" class="hide">
+    <div class="card"><h2>房間代碼</h2><div class="code" id="roomcode">----</div>
+      <div class="hint">把這代碼給朋友加入。</div></div>
+    <div class="card">
+      <h2>玩家 <span id="pcount"></span></h2>
+      <ul class="plist" id="lobbylist"></ul>
+      <div id="hostpanel" class="hide">
+        <label>老闆由誰當？</label>
+        <div class="seg" id="bossmode"><button data-v="host" class="on" onclick="setSeg('bossmode',this)">我當老闆</button><button data-v="random" onclick="setSeg('bossmode',this)">隨機抽</button></div>
+        <label>職級（老鳥/菜鳥）</label>
+        <div class="seg" id="senmode"><button data-v="balanced" class="on" onclick="setSeg('senmode',this)">平均分</button><button data-v="random" onclick="setSeg('senmode',this)">隨機抽</button></div>
+        <label>老闆業績門檻（完成率）</label>
+        <div class="seg" id="threshold"><button data-v="low" onclick="setSeg('threshold',this)">六成(歡樂)</button><button data-v="mid" class="on" onclick="setSeg('threshold',this)">七成(標準)</button><button data-v="high" onclick="setSeg('threshold',this)">八成(硬派)</button></div>
+        <button onclick="doStart()">開始遊戲</button>
+      </div>
+      <div id="waithost" class="hint hide">等房主開始遊戲…</div>
+    </div>
+    <div id="rules-lobby"></div>
+  </div>
+
+  <div id="s-game" class="hide">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0">第 <span id="round"></span>/<span id="rounds"></span> 回合</h2>
+        <span id="myrole"></span>
+      </div>
+      <div class="me" id="mystats"></div>
+      <div class="timer hide" id="timer"></div>
+      <div class="status" id="status"></div>
+      <div id="mytask"></div>
+
+      <!-- 老闆行政 -->
+      <div id="admin" class="hide">
+        <div id="adminboss" class="hide">
+          <div class="hint" id="adminhint"></div>
+          <div style="font-size:.82rem;color:var(--kraft2);margin:6px 0 2px">派任務</div>
+          <ul class="plist" id="assignlist"></ul>
+          <div id="promotebox"></div>
+          <div id="firebox"></div>
+          <button onclick="sock.emit('beginRound')">進入本回合 ▶</button>
+        </div>
+        <div id="adminwait" class="hint hide">老闆行政中（派工作／升職／資遣）…</div>
+      </div>
+
+      <!-- 員工選動作 -->
+      <div id="empchoose" class="hide">
+        <div id="helpbox"></div>
+        <div class="zones" id="empzones"></div>
+      </div>
+      <!-- 主管協查 -->
+      <div id="supchoose" class="hide">
+        <div class="hint" id="suphint"></div>
+        <div class="zones" id="supzones"></div>
+        <button id="supsubmit" onclick="submitSup()">確定</button>
+      </div>
+      <!-- 老闆選查 -->
+      <div id="bosschoose" class="hide">
+        <div class="hint" id="bosshint"></div>
+        <div class="zones" id="bosszones"></div>
+        <button id="bosssubmit" onclick="submitBoss()">確定巡這些地方</button>
+      </div>
+
+      <!-- 揭曉 -->
+      <div id="reveal" class="hide">
+        <h2 id="revtitle"></h2>
+        <div id="revlist"></div>
+        <button id="nextbtn" class="hide" onclick="sock.emit('nextRound')">下一回合 ▶</button>
+        <div id="waitnext" class="hint hide">等房主進入下一回合…</div>
+      </div>
+    </div>
+    <div class="card"><h2>紀錄</h2><div class="log" id="log"></div></div>
+  </div>
+
+  <div id="s-end" class="hide">
+    <div class="card">
+      <div class="banner" id="endbanner"></div>
+      <div class="hint" id="endreason"></div>
+      <div class="hint" id="endrate"></div>
+      <ul class="plist" id="ranking"></ul>
+      <div id="hostend" class="hide"><button onclick="sock.emit('restart')">再玩一局</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="voicebar" class="voicebar hide">
+  <button id="voicebtn" onclick="toggleVoice()">🎤 開語音</button>
+  <button id="mutebtn" class="mute hide" onclick="toggleMute()">🔇 靜音</button>
+  <span class="vi" id="voiceinfo"></span>
+</div>
+<div id="audios" style="display:none"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null;
+const seg={bossmode:'host',senmode:'balanced',threshold:'mid'};
+function $(id){return document.getElementById(id)}
+function show(id){['s-home','s-lobby','s-game','s-end'].forEach(s=>$(s).classList.toggle('hide',s!==id))}
+function err(m){$('err').textContent=m||''; if(m)setTimeout(()=>{if($('err').textContent===m)$('err').textContent=''},4000);}
+function setSeg(g,btn){seg[g]=btn.dataset.v;[...btn.parentNode.children].forEach(b=>b.classList.toggle('on',b===btn));}
+function doCreate(){const n=$('name').value.trim();if(!n)return err('請先輸入暱稱');sock.emit('createRoom',{name:n},r=>{if(r.error)return err(r.error);});}
+function doJoin(){const n=$('name').value.trim();const c=$('joincode').value.trim().toUpperCase();if(!n)return err('請輸入暱稱');if(!c)return err('請輸入代碼');sock.emit('joinRoom',{name:n,code:c},r=>{if(r.error)return err(r.error);});}
+function doStart(){sock.emit('startGame',{bossMode:seg.bossmode,seniorityMode:seg.senmode,threshold:seg.threshold},r=>{if(r&&r.error)return err(r.error);});}
+function submitBoss(){if(bossPicks.length!==ST.bossInspect)return err('請選 '+ST.bossInspect+' 個地方');sock.emit('submitChoice',{zones:bossPicks},r=>{if(r&&r.error)return err(r.error);});}
+function chooseEmp(action,zone){sock.emit('submitChoice',{action,zone,helpTarget},r=>{if(r&&r.error)return err(r.error);});}
+const ZI={office:'🏢',tea:'☕',copy:'🖨️',toilet:'🚻',roof:'🪟'};
+
+sock.on('state',s=>{ST=s;render();});
+
+function roleTag(role,sen){if(role==='boss')return '<span class="tag t-boss">老闆</span>';if(sen==='senior')return '<span class="tag t-senior">老鳥</span>';if(sen==='junior')return '<span class="tag t-junior">菜鳥</span>';return '';}
+
+function render(){
+  $('voicebar').classList.toggle('hide', !ST);
+  if(!ST){show('s-home');return}
+  if(ST.phase==='lobby'){renderLobby();show('s-lobby');}
+  else if(ST.phase==='ended'){renderEnd();show('s-end');}
+  else {renderGame();show('s-game');}
+  renderTimer(); $('log').innerHTML=(ST.log||[]).map(l=>`<div>${esc(l)}</div>`).join('');$('log').scrollTop=9e9;
+}
+function renderLobby(){
+  $('roomcode').textContent=ST.code; $('pcount').textContent='（'+ST.players.length+'/6）';
+  $('lobbylist').innerHTML=ST.players.map(p=>`<li><span>${p.connected?'🟢':'⚪'} ${esc(p.name)} ${p.isHost?'<span class="tag t-host">房主</span>':''}</span></li>`).join('');
+  const amHost=ST.you&&ST.you.isHost; $('hostpanel').classList.toggle('hide',!amHost); $('waithost').classList.toggle('hide',amHost);
+}
+function renderTimer(){
+  if(timerIv){clearInterval(timerIv);timerIv=null;}
+  const t=$('timer');
+  if(ST.timerEndsAt&&(ST.phase==='choosing'||ST.phase==='admin'||ST.phase==='reveal')){
+    t.classList.remove('hide');
+    const upd=()=>{
+      const s=Math.max(0,Math.round((ST.timerEndsAt-Date.now())/1000));
+      if(ST.phase==='reveal'){
+        t.textContent='⏭ '+s+' 秒後自動進入下一回合';
+        t.classList.remove('low');
+        if(ST.you&&ST.you.isHost){ const nb=$('nextbtn'); const left=Math.ceil(((ST.revealSkipAt||0)-Date.now())/1000);
+          if(left>0){ nb.disabled=true; nb.textContent='看結果中…（'+left+'）'; } else { nb.disabled=false; nb.textContent='下一回合 ▶'; } }
+      } else { t.textContent='⏱ '+s+' 秒'; t.classList.toggle('low',s<=10); }
+    };
+    upd(); timerIv=setInterval(upd,500);
+  } else t.classList.add('hide');
+}
+function renderGame(){
+  $('round').textContent=ST.round;$('rounds').textContent=ST.rounds;
+  const you=ST.you;
+  $('myrole').innerHTML = you.isSupervisor ? `<span class="tag" style="background:#a06ea0;color:#fff">主管 ${you.supTermLeft}回</span>` : roleTag(you.role,you.seniority);
+  if(you.role==='emp'){
+    $('mystats').innerHTML=`摸魚 <b>${you.slackCount}</b>　心悸 <b style="color:${you.anxiety>=ST.anxietyOut-1?'#e07a6a':'inherit'}">${you.anxiety}</b>/${ST.anxietyOut}　分 <b>${you.points}</b>${you.canBeFired?' <span class="tag t-boss">有逾期</span>':''}　${you.alive?'':'<b style="color:#e07a6a">已出局(幽靈)</b>'}`;
+  } else {
+    $('mystats').innerHTML=`存活員工 <b>${ST.players.filter(p=>p.role==='emp'&&p.alive).length}</b>　任務完成 <b>${ST.tasksDone}/${ST.tasksIssued}</b>（門檻 ${Math.round(ST.completeThreshold*100)}%）${ST.supervisorName?'　主管:'+esc(ST.supervisorName):''}`;
+  }
+  const mt=$('mytask');
+  if(you.role==='emp'&&you.task){const t=you.task;mt.innerHTML=`<div class="task">📋 你的任務：<b>${esc(t.name)}</b>${t.state==='grace'?' <span class="tag t-boss">補交中</span>':''}<div>進度 ${t.progress}/${t.need}　剩 ${t.deadlineLeft} 回合<div class="bar"><div class="fill" style="width:${Math.min(100,t.progress/t.need*100)}%"></div></div></div></div>`;}
+  else mt.innerHTML='';
+
+  ['admin','empchoose','supchoose','bosschoose','reveal'].forEach(x=>$(x).classList.add('hide'));
+
+  if(ST.phase==='admin'){
+    $('admin').classList.remove('hide');
+    const amBoss=you.role==='boss';
+    $('adminboss').classList.toggle('hide',!amBoss); $('adminwait').classList.toggle('hide',amBoss);
+    if(amBoss){
+      $('adminhint').textContent=`任務卡剩 ${ST.admin.taskLeft}。派工作／升職／資遣後按「進入本回合」。`;
+      $('assignlist').innerHTML=ST.admin.needTask.length?ST.admin.needTask.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px" onclick="sock.emit('assignTask',{targetId:'${p.id}'})">派任務</button></li>`).join(''):'<li style="color:var(--muted)">所有員工都有任務了</li>';
+      renderPromoteFire();
+    }
+    $('status').textContent='';
+  } else if(ST.phase==='choosing'){
+    const waiting=ST.players.filter(p=>!p.submitted&&p.alive).map(p=>p.name);
+    $('status').textContent=you.submitted?('已送出，等：'+waiting.join('、')):'請做選擇';
+    if(!you.alive){$('status').textContent='你已出局（幽靈），觀戰中…';return;}
+    if(you.role==='boss'){renderBossZones();$('bosschoose').classList.remove('hide');$('bosssubmit').disabled=you.submitted;$('bosshint').textContent='選 '+ST.bossInspect+' 個要巡查的地方';}
+    else if(you.isSupervisor){renderSupZones();$('supchoose').classList.remove('hide');}
+    else {renderEmpZones();$('empchoose').classList.remove('hide');}
+  } else if(ST.phase==='reveal'){
+    renderReveal();$('reveal').classList.remove('hide');
+    const amHost=you.isHost;$('nextbtn').classList.toggle('hide',!amHost);$('waitnext').classList.toggle('hide',amHost);$('status').textContent='';
+  }
+}
+function renderPromoteFire(){
+  const a=ST.admin;
+  if(a.supervisorName) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#c79cd0;margin:8px 0 2px">主管：${esc(a.supervisorName)}（任期中）</div>`;
+  else if(a.canPromote&&a.promotable.length) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#c79cd0;margin:8px 0 2px">升職令（升為主管：不能摸魚、免疫被抓、可協查抓人 +2）</div><ul class="plist">`+a.promotable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:#a06ea0;color:#fff" onclick="sock.emit('promote',{targetId:'${p.id}'})">升職</button></li>`).join('')+`</ul>`;
+  else $('promotebox').innerHTML=`<div class="hint" style="text-align:left">升職令冷卻中</div>`;
+  if(a.fireable.length&&a.bossFires>0) $('firebox').innerHTML=`<div style="font-size:.82rem;color:#e07a6a;margin:8px 0 2px">資遣（剩 ${a.bossFires} 次；限有逾期紀錄者）</div><ul class="plist">`+a.fireable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:var(--red);color:#fff" onclick="if(confirm('確定資遣 ${esc(p.name)}？'))sock.emit('fire',{targetId:'${p.id}'})">資遣</button></li>`).join('')+`</ul>`;
+  else $('firebox').innerHTML='';
+}
+function renderSupZones(){
+  const sub=ST.you.submitted;
+  $('suphint').innerHTML='你是<b>主管</b>：不能摸魚、免疫被抓。可協查一個區抓摸魚同事（抓到 +2 分），或不協查。';
+  const cells=[`<div class="zone safe ${supPick===null?'sel':''}" onclick="${sub?'':'pickSup(null)'}"><div class="ic">🙈</div><div class="nm">不協查</div></div>`];
+  for(const k of ST.slackZones){const z=ST.zones[k];cells.push(`<div class="zone ${supPick===k?'sel':''}" onclick="${sub?'':`pickSup('${k}')`}"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">協查</div></div>`);}
+  $('supzones').innerHTML=cells.join(''); $('supsubmit').disabled=sub;
+}
+function pickSup(k){supPick=k;renderSupZones();}
+function submitSup(){sock.emit('submitChoice',{inspectZone:supPick},r=>{if(r&&r.error)return err(r.error);});}
+function toggleHelp(id){helpTarget=id;renderEmpZones();}
+function renderEmpZones(){
+  const you=ST.you, sub=you.submitted, hasTask=!!you.task;
+  if(you.juniors&&you.juniors.length&&!sub){
+    $('helpbox').innerHTML='<div style="font-size:.82rem;color:var(--blue);margin:6px 0">🦉 罩學弟（選填，擋他一次被抓）：<span style="display:inline-flex;flex-wrap:wrap">'+
+      you.juniors.map(j=>`<button style="width:auto;padding:4px 10px;margin:2px;font-size:.82rem" class="${helpTarget===j.id?'on':''}" onclick="toggleHelp('${j.id}')">${esc(j.name)}</button>`).join('')+
+      `<button style="width:auto;padding:4px 10px;margin:2px;font-size:.82rem" class="${!helpTarget?'on':''}" onclick="toggleHelp(null)">不罩</button></span></div>`;
+  } else $('helpbox').innerHTML='';
+  const cells=[];
+  cells.push(`<div class="zone work" onclick="${sub?'':`chooseEmp('work')`}"><div class="ic">💼</div><div class="nm">認真工作</div><div class="m">${hasTask?'任務+2·心悸−1·分−1':'心悸−1·分−1·安全'}</div></div>`);
+  cells.push(`<div class="zone safe" onclick="${sub?'':`chooseEmp('idle')`}"><div class="ic">🏢</div><div class="nm">回辦公室休息</div><div class="m">安全·心悸−1·不算摸魚</div></div>`);
+  for(const k of ST.slackZones){const z=ST.zones[k];const dis=(you.lastZone===k);
+    cells.push(`<div class="zone" style="${dis?'opacity:.35;pointer-events:none':''}" onclick="${sub||dis?'':`chooseEmp('slack','${k}')`}"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">摸魚+1·分${z.slack}·心悸+${z.anxiety}${hasTask?'·任務+1':''}${dis?'(剛待過)':''}</div></div>`);}
+  $('empzones').innerHTML=cells.join('');
+  $('empzones').style.opacity=sub?'.5':'1';
+}
+function renderBossZones(){
+  $('bosszones').innerHTML=ST.slackZones.map(k=>{const z=ST.zones[k];const streak=(ST.zoneStreak&&ST.zoneStreak[k])||0;const locked=streak>=2;const sel=bossPicks.includes(k);
+    return `<div class="zone ${sel?'sel':''}" style="${locked?'opacity:.35;pointer-events:none':''}" onclick="pickBoss('${k}')"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">${locked?'已連查2回·鎖':'點選巡查'}</div></div>`;}).join('');
+}
+function pickBoss(k){const i=bossPicks.indexOf(k);if(i>=0)bossPicks.splice(i,1);else{if(bossPicks.length>=ST.bossInspect)bossPicks.shift();bossPicks.push(k);}renderBossZones();}
+function renderReveal(){
+  bossPicks=[]; supPick=null; helpTarget=null;
+  const r=ST.reveal;if(!r)return;
+  $('revtitle').textContent=`第 ${r.round} 回合 · 老闆巡：${r.bossZones.join('、')||'（無）'}${r.supZone?'｜主管協查 '+r.supZone:''}　｜完成率 ${r.rate}%`;
+  $('revlist').innerHTML=r.results.map(x=>{const cls=x.caught===true?'caught':(x.gain!=null?'ok':'');
+    return `<div class="rev ${cls} ${x.eliminated?'out':''}"><b>${esc(x.name)}</b> ${x.seniority==='senior'?'🦉':'🐣'} → ${x.zoneName}：${x.note}${x.eliminated?' 💀出局':''}</div>`;}).join('');
+}
+function renderEnd(){
+  const w=ST.winner;
+  $('endbanner').textContent=w.side==='boss'?'👔 老闆獲勝！':'🏆 員工陣營獲勝！';
+  $('endreason').textContent=w.reason;
+  const b=w.boss||{};
+  $('endrate').innerHTML=`<div class="bosscard"><span class="grade g-${b.grade||'C'}">${b.grade||'C'}</span><div class="info"><div class="nm">👔 ${esc(b.name||'老闆')}（老闆）</div><div class="ttl">淘汰 ${b.outCount||0}/${b.total||0} 人 · 任務完成率 ${w.rate}%（${w.tasksDone}/${w.tasksIssued}）</div></div></div>`;
+  $('ranking').innerHTML='<div style="color:var(--kraft);font-weight:800;margin:10px 0 6px">🏅 綜合評分</div>'+w.ranking.map(p=>`
+    <div class="ritem ${p.isKing?'king':''}">
+      <span class="grade g-${p.grade}">${p.grade}</span>
+      <div class="info">
+        <div class="nm">${p.isKing?'👑 ':''}${esc(p.name)} ${p.seniority==='senior'?'🦉':'🐣'} <span class="ttl">${p.title}</span></div>
+        <div class="ttl">摸魚 ${p.slackCount} 次 · 分 ${p.points} · 心悸 ${p.anxiety}${p.alive?'':' · 已出局'}</div>
+      </div>
+      <span class="comp">${p.comp}</span>
+    </div>`).join('');
+  $('hostend').classList.toggle('hide',!(ST.you&&ST.you.isHost));
+}
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+const RULES_BODY=`
+<h4>🎯 你在玩什麼</h4>
+<p>你是想混到下班的員工，老闆會<b>派工作</b>也會到處<b>巡邏抓摸魚</b>。把工作做到剛好、又偷到最多懶，就是高手。</p>
+<h4>🔄 每回合怎麼跑</h4>
+<ul><li>老闆先派工作給員工</li><li>大家同時偷偷選：員工→認真工作 / 去某區摸魚 / 辦公室發呆；老闆→要巡哪幾區</li><li>一起翻開、自動結算</li></ul>
+<h4>🗺️ 地點（越爽越危險）</h4>
+<p><span class="z">🏢 辦公室：安全、不算摸魚　｜　🖨️影印/☕茶水：摸魚 +2 分、心悸 +1　｜　🚻廁所/🪟頂樓：+3 分、心悸 +2</span></p>
+<h4>🚨 被抓 & 出局</h4>
+<p>老闆巡到你摸魚的那區 → 這次不算 ＋ 心悸 +2（菜鳥 +3）。<b>心悸滿 6（6 人局 5）就嚇到請辭出局</b>。有人龜在辦公室，會害其他人各 +1 心悸。</p>
+<h4>🧑‍🤝‍🧑 老鳥 / 菜鳥</h4>
+<p>🐣 菜鳥：摸魚 +1 分，但老闆巡到<b>隔壁區也會抓到你</b>。🦉 老鳥：摸魚 −1 分，但有一張<b>免死金牌</b>、要被連盯兩回合才抓得到。</p>
+<h4>📋 工作（拿到任務時）</h4>
+<p>認真做（+2 進度、安全）｜ 邊做邊摸（+1 進度、有分但被抓算怠工）｜ 擺爛（易逾期）。做完任務額外 +1 分。</p>
+<h4>📏 兩條限制</h4>
+<p>員工不能連兩回合待同一摸魚區；老闆不能連查同一地方三次。</p>
+<h4>🏆 獲勝條件</h4>
+<div class="win"><b>員工個人</b>：撐到下班還活著、而且<b>摸魚次數最多</b> → 摸魚王 👑</div>
+<div class="win"><b>員工陣營</b>：讓老闆的<b>任務完成率低於門檻</b>，且至少一人存活</div>
+<div class="win boss"><b>老闆</b>：<b>任務完成率達門檻</b>（開房可設六～八成），或把員工<b>全部淘汰</b></div>
+<h4>🏅 下班後 · 綜合評分</h4>
+<p>每人算綜合分＝摸魚分 ＋ 摸魚次數×2 ＋ 存活獎勵 − 心悸，給 S/A/B/C 等級與稱號。</p>`;
+function injectRules(){
+  if($('rules-home')) $('rules-home').innerHTML='<details class="rules" open><summary>📖 遊戲規則與獲勝條件</summary><div class="body">'+RULES_BODY+'</div></details>';
+  if($('rules-lobby')) $('rules-lobby').innerHTML='<details class="rules"><summary>📖 遊戲規則與獲勝條件（點開複習）</summary><div class="body">'+RULES_BODY+'</div></details>';
+}
+injectRules();
+
+// ===== 語音（WebRTC P2P mesh；信令走 socket）=====
+let localStream=null, vpeers={}, voiceActive=false, muted=false;
+const VOICE_URL='https://'+location.hostname+':8443';
+const RTC_CFG={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
+function voiceSupported(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.RTCPeerConnection); }
+async function toggleVoice(){
+  if(voiceActive){ stopVoice(); return; }
+  if(!voiceSupported()){ alert('這個連線不能開麥克風（瀏覽器限制）。\n請改用語音專用網址：\n'+VOICE_URL+'\n（第一次會出現憑證警告，點「進階→繼續前往」即可）'); return; }
+  try{ localStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false}); }
+  catch(e){ alert('無法取得麥克風：'+(e&&e.message||e)); return; }
+  voiceActive=true; muted=false;
+  $('voicebtn').textContent='📴 關語音'; $('mutebtn').classList.remove('hide'); $('mutebtn').textContent='🔇 靜音';
+  sock.emit('voice-join'); updateVoiceInfo();
+}
+function stopVoice(){
+  voiceActive=false; sock.emit('voice-leave');
+  for(const id in vpeers){ try{vpeers[id].close();}catch(e){} const a=$('a_'+id); if(a)a.remove(); } vpeers={};
+  if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null; }
+  $('voicebtn').textContent='🎤 開語音'; $('mutebtn').classList.add('hide'); updateVoiceInfo();
+}
+function toggleMute(){ if(!localStream)return; muted=!muted; localStream.getAudioTracks().forEach(t=>t.enabled=!muted); $('mutebtn').textContent=muted?'🎙 取消靜音':'🔇 靜音'; }
+function vMakePeer(id, initiator){
+  const pc=new RTCPeerConnection(RTC_CFG);
+  if(localStream) localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+  pc.onicecandidate=e=>{ if(e.candidate) sock.emit('voice-signal',{to:id,data:{ice:e.candidate}}); };
+  pc.ontrack=e=>{ let a=$('a_'+id); if(!a){ a=document.createElement('audio'); a.id='a_'+id; a.autoplay=true; a.playsInline=true; $('audios').appendChild(a); } a.srcObject=e.streams[0]; a.play&&a.play().catch(()=>{}); };
+  vpeers[id]=pc;
+  if(initiator){ pc.createOffer().then(o=>pc.setLocalDescription(o)).then(()=>sock.emit('voice-signal',{to:id,data:{sdp:pc.localDescription}})).catch(()=>{}); }
+  return pc;
+}
+sock.on('voice-peers', list=>{ (list||[]).forEach(p=>vMakePeer(p.id,true)); updateVoiceInfo(); });
+sock.on('voice-joined', ()=>{ updateVoiceInfo(); });     // 對方會主動 offer，我們等 offer
+sock.on('voice-signal', async ({from,data})=>{
+  if(!voiceActive) return;
+  let pc=vpeers[from]; if(!pc){ pc=vMakePeer(from,false); }
+  try{
+    if(data.sdp){ await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      if(data.sdp.type==='offer'){ const ans=await pc.createAnswer(); await pc.setLocalDescription(ans); sock.emit('voice-signal',{to:from,data:{sdp:pc.localDescription}}); } }
+    else if(data.ice){ await pc.addIceCandidate(new RTCIceCandidate(data.ice)); }
+  }catch(e){}
+});
+sock.on('voice-left', ({id})=>{ if(vpeers[id]){ try{vpeers[id].close();}catch(e){} delete vpeers[id]; } const a=$('a_'+id); if(a)a.remove(); updateVoiceInfo(); });
+function updateVoiceInfo(){ $('voiceinfo').textContent = voiceActive ? ('🔊 語音中（'+(Object.keys(vpeers).length+1)+' 人）') : (voiceSupported()?'':'語音需 '+VOICE_URL); }
+
+show('s-home');
+updateVoiceInfo();
+</script>
+</body>
+</html>
