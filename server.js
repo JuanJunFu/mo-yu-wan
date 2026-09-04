@@ -344,6 +344,30 @@ io.on('connection', (socket)=>{
   });
   socket.on('specLeave', ()=>{ const room=rooms.get(socket.data.specCode); if(room&&room.spectators) room.spectators.delete(socket.id); socket.data.specCode=null; });
 
+  // 房主變更/解除房間密碼（已在房內者不受影響；舊邀請連結的 key 會失效）
+  socket.on('setPassword', ({password}, cb)=>{
+    const room=rooms.get(socket.data.roomCode); if(!room) return cb&&cb({error:'你不在任何房間'});
+    if(socket.id!==room.hostId) return cb&&cb({error:'只有房主能改密碼'});
+    password=(password||'').toString().trim();
+    if(password&&!/^\d{4}$/.test(password)) return cb&&cb({error:'密碼須為 4 位數字'});
+    room.password=password||null; touch(room);
+    log(room, password?'🔑 房主更新了房間密碼':'🔓 房主解除了房間密碼');
+    cb&&cb({ok:true}); broadcast(room);
+  });
+
+  // 房主主動關閉房間，釋出名額
+  socket.on('closeRoom', (cb)=>{
+    const room=rooms.get(socket.data.roomCode); if(!room) return cb&&cb({error:'你不在任何房間'});
+    if(socket.id!==room.hostId) return cb&&cb({error:'只有房主能關閉房間'});
+    clearTimer(room);
+    for(const p of room.players.values()){
+      if(p.connected&&p.socket){ p.socket.emit('kicked',{reason:'房主關閉了房間'}); p.socket.leave(room.code); p.socket.data.roomCode=null; }
+    }
+    if(room.spectators) for(const s of room.spectators.values()){ s.socket.emit('kicked',{reason:'房主關閉了房間'}); s.socket.data.specCode=null; }
+    rooms.delete(room.code);
+    cb&&cb({ok:true});
+  });
+
   // 邀請連結 QR Code（伺服器端產生，不經第三方服務）
   socket.on('makeQR', ({text}, cb)=>{
     if(typeof text!=='string'||text.length>300||!/^https?:\/\//.test(text)) return cb&&cb({error:'無效的連結'});
@@ -434,7 +458,9 @@ io.on('connection', (socket)=>{
 
   socket.on('restart', ()=>{
     const room=rooms.get(socket.data.roomCode); if(!room||socket.id!==room.hostId) return;
-    clearTimer(room); touch(room); room.phase='lobby'; room.round=0; room.winner=null; room.choices={emp:{},boss:null};
+    clearTimer(room); touch(room);
+    for(const [id,p] of room.players) if(!p.connected) room.players.delete(id); // 再玩一局時剔除離線者
+    room.phase='lobby'; room.round=0; room.winner=null; room.choices={emp:{},boss:null};
     room.tasksIssued=0; room.tasksDone=0; room.supervisorId=null; room.promoteCooldown=0; room.bossFires=BOSS_FIRES;
     for(const p of room.players.values()){ p.role=null;p.seniority=null;p.alive=true;p.isGhost=false;p.slackCount=0;p.points=0;p.anxiety=0;p.lastZone=null;p.task=null;p.immunity=0;p.isSupervisor=false;p.supTermLeft=0;p.helpCooldown=0;p.canBeFired=false; }
     log(room,'房主重開一局。'); broadcast(room);
@@ -454,9 +480,16 @@ io.on('connection', (socket)=>{
   socket.on('disconnect', ()=>{
     const sr=rooms.get(socket.data.specCode); if(sr&&sr.spectators) sr.spectators.delete(socket.id);
     const room=rooms.get(socket.data.roomCode); if(!room) return;
-    const me=room.players.get(socket.id); if(me){ if(me.voiceOn){ me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); } me.connected=false; log(room,`【${me.name}】離線`); }
+    const me=room.players.get(socket.id);
+    if(me){
+      if(me.voiceOn){ me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); }
+      me.connected=false;
+      // 等待室/結算畫面離線＝直接讓出名額；遊戲中保留座位（角色還在局裡）
+      if(room.phase==='lobby'||room.phase==='ended'){ room.players.delete(socket.id); touch(room); log(room,`【${me.name}】離開房間（名額已釋出）`); }
+      else log(room,`【${me.name}】離線`);
+    }
     if(socket.id===room.hostId){ const others=[...room.players.values()].filter(p=>p.connected); if(others.length){ room.hostId=others[0].id; log(room,`房主離線，改由【${others[0].name}】接手`); } }
-    if([...room.players.values()].every(p=>!p.connected)){ clearTimer(room); rooms.delete(room.code); return; }
+    if(room.players.size===0||[...room.players.values()].every(p=>!p.connected)){ clearTimer(room); rooms.delete(room.code); return; }
     broadcast(room);
   });
 });

@@ -64,8 +64,8 @@
   .rules .z{display:inline-block;font-size:.8rem;color:var(--muted)}
   .err{color:#e07a6a;text-align:center;font-weight:700;min-height:20px}
   .seg{display:flex;gap:6px;margin:4px 0}
-  .seg button{flex:1;margin:0;font-size:.82rem;padding:8px}
-  .seg button.on{outline:2px solid var(--gold)}
+  .seg button{flex:1;margin:0;font-size:.82rem;padding:8px;background:#2a2016;color:var(--muted);border:1px solid var(--line);font-weight:600}
+  .seg button.on{background:var(--gold);color:#241c10;border-color:var(--gold);font-weight:900}
   .hide{display:none}
   .voicebar{position:fixed;left:0;right:0;bottom:0;background:#1c150d;border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:10px;align-items:center;justify-content:center;z-index:50}
   .voicebar button{width:auto;margin:0;padding:8px 14px;font-size:.9rem}
@@ -118,7 +118,13 @@
         <div class="seg" id="senmode"><button data-v="balanced" class="on" onclick="setSeg('senmode',this)">平均分</button><button data-v="random" onclick="setSeg('senmode',this)">隨機抽</button></div>
         <label>老闆業績門檻（完成率）</label>
         <div class="seg" id="threshold"><button data-v="low" onclick="setSeg('threshold',this)">六成(歡樂)</button><button data-v="mid" class="on" onclick="setSeg('threshold',this)">七成(標準)</button><button data-v="high" onclick="setSeg('threshold',this)">八成(硬派)</button></div>
+        <label>房間密碼（輸入新密碼更新；留空＝解除鎖定）</label>
+        <div class="row2">
+          <input id="newpwd" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="4 位數字或留空">
+          <button class="ghost" style="margin-top:0" onclick="setPwd()">🔑 更新密碼</button>
+        </div>
         <button onclick="doStart()">開始遊戲</button>
+        <button class="ghost" style="color:#e07a6a;border-color:#e07a6a" onclick="closeRoom()">🚪 關閉房間（釋出名額）</button>
       </div>
       <div id="waithost" class="hint hide">等房主開始遊戲…</div>
     </div>
@@ -193,7 +199,8 @@
       <div class="hint" id="endreason"></div>
       <div class="hint" id="endrate"></div>
       <ul class="plist" id="ranking"></ul>
-      <div id="hostend" class="hide"><button onclick="sock.emit('restart')">再玩一局</button></div>
+      <div id="hostend" class="hide"><button onclick="sock.emit('restart')">再玩一局</button>
+        <button class="ghost" style="color:#e07a6a;border-color:#e07a6a" onclick="closeRoom()">🚪 關閉房間（釋出名額）</button></div>
     </div>
   </div>
 </div>
@@ -276,6 +283,12 @@ function showQR(){if(!ST)return;
     $('qrhint').textContent='房間 '+ST.code+(myPwd?'（含密碼，掃了直接進）':'');
     $('qrmodal').style.display='flex';});}
 function hideQR(){$('qrmodal').style.display='none';}
+function closeRoom(){if(!confirm('確定關閉房間？所有人都會被請出。'))return;
+  sock.emit('closeRoom',r=>{if(r&&r.error)err(r.error);});}
+function setPwd(){const p=$('newpwd').value.trim();
+  if(p&&!/^\d{4}$/.test(p))return err('密碼須為 4 位數字（留空＝解除鎖定）');
+  sock.emit('setPassword',{password:p},r=>{if(r&&r.error)return err(r.error);
+    myPwd=p||null;err(p?'密碼已更新 ✅（邀請連結/QR 已同步新密碼）':'已解除鎖定 ✅');});}
 function refreshRooms(){
   sock.emit('listRooms',res=>{
     if(!res||!res.ok)return;
@@ -504,14 +517,17 @@ show('s-home');
 updateVoiceInfo();
 refreshRooms();
 
+// 同裝置記住暱稱：重新整理/中途離開再回來，暱稱欄自動帶回
+const savedName=(function(){try{return localStorage.getItem('moyu_name')||'';}catch(e){return '';}})();
+if(savedName)$('name').value=savedName;
+
 // 邀請連結：?room=CODE&key=1234 → 免輸房號密碼；記得暱稱就直接自動進房
 const _qp=new URLSearchParams(location.search);
 const inviteRoom=(_qp.get('room')||'').toUpperCase();
 const inviteKey=_qp.get('key')||undefined;
 if(inviteRoom){
   $('joincode').value=inviteRoom;
-  const saved=(function(){try{return localStorage.getItem('moyu_name')||'';}catch(e){return '';}})();
-  if(saved){$('name').value=saved;joinWith(inviteRoom,inviteKey);}
+  if(savedName)joinWith(inviteRoom,inviteKey);
   else err('受邀加入房間 '+inviteRoom+'：輸入暱稱後按「加入房間」');
 }
 </script>
