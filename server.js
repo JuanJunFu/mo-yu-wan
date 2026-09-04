@@ -610,7 +610,7 @@ setInterval(()=>{
 const PORT=process.env.PORT||3000;
 const httpServer=http.createServer(app);
 io.attach(httpServer);
-httpServer.listen(PORT, ()=>console.log(`摸魚王 online (Phase3+語音) HTTP 已啟動 :${PORT}`));
+httpServer.listen(PORT, ()=>console.log(`摸魚王 online (Phase4 幽靈+手牌+動畫揭曉) HTTP 已啟動 :${PORT}`));
 
 // HTTPS（自簽憑證）供語音使用（麥克風 getUserMedia 需安全連線）
 try{
