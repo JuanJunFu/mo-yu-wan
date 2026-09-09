@@ -5,53 +5,72 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>摸魚王 · 線上房間</title>
 <style>
-  :root{--bg:#14110c;--ink:#f0e7d5;--muted:#a89a80;--line:#3a3428;--panel:#1e1a13;--kraft:#c9a86a;--kraft2:#a8894f;--red:#c0392b;--green:#6ea06a;--gold:#e0b84a;--blue:#6a8fb0}
+  /* ===== 童話繪本風（storybook skin）：羊皮紙＋木框＋木牌按鈕；遊戲邏輯零更動 ===== */
+  :root{--bg:#e3d3ab;--paper:#f4e9cd;--paper2:#eadbb4;--strip:#faf1da;--ink:#3a2a18;--muted:#8a7355;--line:#c2a473;--wood:#6b4423;--wood2:#4a2c14;--kraft:#8a5a30;--kraft2:#7a5a34;--red:#a83226;--green:#4a7040;--gold:#a5770b;--goldL:#d9a520;--blue:#4a6a8a;--purple:#6a5a8a;--panel:var(--paper)}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;line-height:1.6}
-  .wrap{max-width:660px;margin:0 auto;padding:20px 14px 60px}
-  h1{font-size:1.9rem;margin:6px 0;text-align:center;letter-spacing:2px}
-  .jp{text-align:center;color:var(--kraft2);letter-spacing:4px;font-size:.8rem;margin-bottom:12px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
+  body{margin:0;color:var(--ink);line-height:1.65;font-family:"Noto Serif TC","PMingLiU","MingLiU",Georgia,serif;
+    background:radial-gradient(ellipse at 50% -10%,rgba(255,248,224,.7),transparent 55%),
+      repeating-linear-gradient(0deg,rgba(120,90,40,.04) 0 2px,transparent 2px 5px),
+      repeating-linear-gradient(90deg,rgba(120,90,40,.03) 0 3px,transparent 3px 7px),
+      var(--bg)}
+  .wrap{max-width:660px;margin:0 auto;padding:20px 14px 70px}
+  h1{font-size:2rem;margin:8px 0 0;text-align:center;letter-spacing:8px;color:var(--wood2);text-shadow:0 1px 0 #fff8e0}
+  h1::before{content:'❦  ';color:var(--goldL);font-size:.7em}h1::after{content:'  ❦';color:var(--goldL);font-size:.7em}
+  .jp{text-align:center;color:var(--kraft);letter-spacing:5px;font-size:.8rem;margin-bottom:12px}
+  .jp::after{content:'';display:block;width:180px;margin:8px auto 0;border-bottom:2px double var(--line)}
+  .card{background:var(--paper);border:3px solid var(--wood);border-radius:6px;padding:16px;margin:14px 0;position:relative;
+    box-shadow:0 2px 10px rgba(74,44,20,.28),inset 0 0 0 1px #cdb27e,inset 0 0 46px rgba(160,120,60,.14)}
   h2{color:var(--kraft);font-size:1.05rem;margin:0 0 10px}
   label{display:block;font-size:.82rem;color:var(--muted);margin:10px 0 4px}
-  input{width:100%;background:#141009;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:11px 12px;font-size:1.05rem;font-family:inherit}
-  button{background:var(--kraft);color:#241c10;border:0;border-radius:8px;padding:12px 16px;font-weight:800;cursor:pointer;font-family:inherit;font-size:1rem;width:100%;margin-top:10px}
-  button.ghost{background:#2a2016;color:var(--kraft);border:1px solid var(--kraft2)}
-  button:disabled{opacity:.4;cursor:not-allowed}
+  input{width:100%;background:#fbf4e0;color:var(--ink);border:1.5px solid var(--line);border-radius:6px;padding:11px 12px;font-size:1.05rem;font-family:inherit;box-shadow:inset 0 1px 3px rgba(120,90,40,.18)}
+  /* 木牌按鈕 */
+  button{background:linear-gradient(180deg,#96633a,#6b4423 55%,#5a3820);color:#f7ecd2;border:2px solid var(--wood2);border-radius:8px;padding:12px 16px;font-weight:800;cursor:pointer;font-family:inherit;font-size:1rem;width:100%;margin-top:10px;letter-spacing:1px;
+    box-shadow:inset 0 1px 0 rgba(255,230,180,.4),inset 0 -2px 4px rgba(40,20,5,.3),0 2px 5px rgba(60,35,15,.35);text-shadow:0 1px 2px rgba(40,20,5,.55)}
+  button:active{transform:translateY(1px)}
+  /* 羊皮紙按鈕 */
+  button.ghost{background:linear-gradient(180deg,#f7eed6,#e9dab2);color:var(--wood2);border:1.5px solid var(--kraft);text-shadow:none;box-shadow:inset 0 0 0 1px #fff6dc,0 1px 3px rgba(74,44,20,.22)}
+  button:disabled{opacity:.45;cursor:not-allowed}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .code{font-family:ui-monospace,Consolas,monospace;font-size:1.8rem;letter-spacing:4px;color:var(--gold);text-align:center;font-weight:900}
+  .code{font-family:ui-monospace,Consolas,monospace;font-size:1.8rem;letter-spacing:4px;color:var(--gold);text-align:center;font-weight:900;text-shadow:0 1px 0 #fff8e0}
   .plist{list-style:none;padding:0;margin:8px 0}
-  .plist li{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:#191510}
+  .plist li{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;background:var(--strip)}
   .tag{font-size:.7rem;font-weight:800;padding:1px 8px;border-radius:99px;margin-left:6px}
-  .t-boss{background:var(--red);color:#fff}.t-senior{background:var(--blue);color:#fff}.t-junior{background:var(--green);color:#fff}.t-host{background:var(--gold);color:#241c10}
+  .t-boss{background:var(--red);color:#fff}.t-senior{background:var(--blue);color:#fff}.t-junior{background:var(--green);color:#fff}.t-host{background:var(--goldL);color:#3a2a10}
   .zones{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
-  .zone{border:2px solid var(--kraft2);border-radius:10px;padding:11px 8px;text-align:center;cursor:pointer;background:#1c150d;user-select:none}
+  /* 木頭棋盤格 */
+  .zone{border:2px solid var(--kraft);border-radius:8px;padding:11px 8px;text-align:center;cursor:pointer;user-select:none;background:linear-gradient(180deg,#f3e9cc,#e7d7ad);box-shadow:0 1px 3px rgba(74,44,20,.2),inset 0 1px 0 #fff6dc}
   .zone.safe{border-color:var(--green)} .zone.work{border-color:var(--blue)}
-  .zone.sel{outline:3px solid var(--gold);background:#2a2213}
+  .zone.sel{outline:3px solid var(--goldL);background:#fdf3d0}
   .zone .ic{font-size:1.5rem}.zone .nm{font-weight:800}.zone .m{font-size:.72rem;color:var(--muted)}
   .me{display:flex;gap:12px;flex-wrap:wrap;font-size:.88rem;margin:6px 0;color:var(--muted)}
   .me b{color:var(--ink)}
   .status{text-align:center;color:var(--gold);font-weight:800;margin:8px 0}
   .timer{text-align:center;font-family:ui-monospace,Consolas,monospace;font-size:1.3rem;font-weight:900;color:var(--gold)}
-  .timer.low{color:#e07a6a}
-  .task{background:#241f16;border:1px solid var(--kraft2);border-radius:10px;padding:10px 12px;margin:8px 0}
-  .task .bar{height:8px;background:#0f0c07;border-radius:6px;overflow:hidden;margin-top:6px}
-  .task .fill{height:100%;background:var(--blue)}
-  .log{font-size:.82rem;color:var(--muted);background:#191510;border-radius:8px;padding:10px;max-height:150px;overflow:auto}
-  .log div{padding:2px 0;border-bottom:1px solid #241f16}
-  .rev{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;background:#191510}
+  .timer.low{color:var(--red)}
+  /* 魔法任務卷軸 */
+  .task{background:linear-gradient(180deg,#fdf6df,#f1e4bc);border:1.5px solid var(--goldL);border-radius:4px;padding:10px 14px;margin:8px 0;position:relative;
+    box-shadow:0 1px 4px rgba(74,44,20,.22),inset 0 0 20px rgba(217,165,32,.12)}
+  .task::before,.task::after{content:'';position:absolute;left:-2px;right:-2px;height:7px;background:linear-gradient(180deg,#8a5a30,#6b4423);border-radius:99px;box-shadow:0 1px 2px rgba(60,35,15,.4)}
+  .task::before{top:-5px}.task::after{bottom:-5px}
+  .task .bar{height:10px;background:#e2d2a4;border-radius:6px;overflow:hidden;margin-top:6px;border:1px solid var(--line)}
+  .task .fill{height:100%;background:linear-gradient(90deg,#e8c14a,#b8860b)}
+  .log{font-size:.82rem;color:var(--muted);background:var(--strip);border:1px solid var(--line);border-radius:6px;padding:10px;max-height:150px;overflow:auto}
+  .log div{padding:2px 0;border-bottom:1px dashed #d8c496}
+  .rev{border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:6px 0;background:var(--strip)}
   .rev.caught{border-color:var(--red)} .rev.ok{border-color:var(--green)} .rev.out{opacity:.55}
-  .banner{text-align:center;font-size:1.4rem;font-weight:900;color:var(--gold);margin:10px 0}
-  .grade{display:inline-flex;width:36px;height:36px;border-radius:8px;align-items:center;justify-content:center;font-weight:900;font-size:1.15rem;flex:0 0 auto}
-  .g-S{background:var(--gold);color:#241c10}.g-A{background:var(--green);color:#fff}.g-B{background:var(--blue);color:#fff}.g-C{background:#5a5348;color:#fff}
-  .ritem{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:#191510}
-  .ritem.king{border-color:var(--gold);background:#241f10}
+  .banner{text-align:center;font-size:1.4rem;font-weight:900;color:var(--wood2);margin:10px 0;letter-spacing:2px}
+  .theend{text-align:center;letter-spacing:6px;color:var(--muted);font-size:.85rem;margin:2px 0 6px}
+  .theend::before,.theend::after{content:' ── ';color:var(--line)}
+  .grade{display:inline-flex;width:36px;height:36px;border-radius:50%;align-items:center;justify-content:center;font-weight:900;font-size:1.15rem;flex:0 0 auto;border:2px solid rgba(74,44,20,.35);box-shadow:0 1px 2px rgba(74,44,20,.3)}
+  .g-S{background:var(--goldL);color:#3a2a10}.g-A{background:var(--green);color:#fff}.g-B{background:var(--blue);color:#fff}.g-C{background:#8a7a64;color:#fff}
+  .ritem{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--strip)}
+  .ritem.king{border:2px solid var(--goldL);background:#fdf1c8;box-shadow:inset 0 0 18px rgba(217,165,32,.18)}
   .ritem .info{flex:1;min-width:0}.ritem .nm{font-weight:800}.ritem .ttl{font-size:.78rem;color:var(--muted)}
   .ritem .comp{font-family:ui-monospace,Consolas,monospace;font-weight:900;font-size:1.3rem;color:var(--gold);flex:0 0 auto}
-  .bosscard{display:flex;align-items:center;gap:10px;border:1px solid var(--red);border-radius:10px;padding:10px 14px;margin:8px 0;background:#1c1310}
+  .bosscard{display:flex;align-items:center;gap:10px;border:1.5px solid var(--red);border-radius:8px;padding:10px 14px;margin:8px 0;background:#f8e8dc}
   .bosscard .info{flex:1}.bosscard .nm{font-weight:800}
   .hint{font-size:.8rem;color:var(--muted);text-align:center;margin-top:8px}
-  .rules{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 16px;margin:12px 0}
+  .rules{background:var(--paper);border:3px solid var(--wood);border-radius:6px;padding:0 16px;margin:14px 0;box-shadow:0 2px 10px rgba(74,44,20,.28),inset 0 0 0 1px #cdb27e}
   .rules summary{cursor:pointer;font-weight:800;color:var(--kraft);padding:14px 0;font-size:1.05rem;list-style:none}
   .rules summary::-webkit-details-marker{display:none}
   .rules summary::before{content:'▸ ';color:var(--kraft2)}
@@ -62,52 +81,55 @@
   .rules .win{border-left:3px solid var(--green);padding:2px 0 2px 10px;margin:6px 0;font-size:.9rem}
   .rules .win.boss{border-left-color:var(--red)} .rules .win b{color:var(--gold)}
   .rules .z{display:inline-block;font-size:.8rem;color:var(--muted)}
-  .err{color:#e07a6a;text-align:center;font-weight:700;min-height:20px}
+  .err{color:var(--red);text-align:center;font-weight:700;min-height:20px}
+  /* 美術圖槽：public/art/ 放入對應檔名即自動顯示，缺圖自動收起 */
+  .art{margin:10px 0;border:3px solid var(--wood);border-radius:6px;overflow:hidden;box-shadow:0 2px 10px rgba(74,44,20,.3),inset 0 0 0 1px #cdb27e;background:var(--paper2)}
+  .art img{display:block;width:100%}
   /* ===== 手牌 ===== */
   .hand{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
-  .hcard{border:1px solid var(--kraft2);border-radius:8px;padding:6px 9px;font-size:.8rem;background:#221b10;cursor:pointer;user-select:none;line-height:1.3}
+  .hcard{border:1.5px solid var(--kraft);border-radius:6px;padding:6px 9px;font-size:.8rem;background:linear-gradient(180deg,#faf1da,#eee0ba);cursor:pointer;user-select:none;line-height:1.3;box-shadow:0 1px 2px rgba(74,44,20,.2)}
   .hcard .hn{font-weight:800}.hcard .hd{color:var(--muted);font-size:.7rem}
   .hcard.passive{cursor:default;border-style:dashed;opacity:.85}
-  .hcard.sel{outline:2px solid var(--gold);background:#2a2213}
+  .hcard.sel{outline:2px solid var(--goldL);background:#fdf3d0}
   /* ===== 幽靈面板 ===== */
-  .ghostbox{border:1px solid #7a6a9a;border-radius:10px;padding:10px;background:#191322;margin:8px 0}
+  .ghostbox{border:1.5px solid var(--purple);border-radius:8px;padding:10px;background:#efe9f4;margin:8px 0}
   .ghostbox .gb{display:flex;gap:6px;margin-top:6px}
-  .ghostbox button{margin:0;font-size:.85rem;padding:9px 6px;background:#2a2140;color:#cabce8;border:1px solid #7a6a9a}
-  .ghostbox button.on{background:#7a6a9a;color:#fff}
+  .ghostbox button{margin:0;font-size:.85rem;padding:9px 6px;background:#e2d9ec;color:#4a3a6a;border:1.5px solid var(--purple);box-shadow:none;text-shadow:none}
+  .ghostbox button.on{background:var(--purple);color:#fff}
   /* ===== 動畫揭曉板 ===== */
   .board{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
-  .bzone{border:2px solid var(--kraft2);border-radius:10px;min-height:86px;padding:6px 8px;background:#1c150d;position:relative;transition:box-shadow .3s,border-color .3s;overflow:hidden}
+  .bzone{border:2px solid var(--kraft);border-radius:8px;min-height:86px;padding:6px 8px;background:linear-gradient(180deg,#f3e9cc,#ecdfba);position:relative;transition:box-shadow .3s,border-color .3s;overflow:hidden}
   .bzone.office{grid-column:1/3;min-height:70px;border-color:var(--green)}
   .bzone .bt{font-size:.78rem;color:var(--muted);font-weight:800}
-  .bzone.inspected{border-color:var(--red);box-shadow:0 0 14px rgba(192,57,43,.55);animation:pulseR 1s ease-in-out 2}
+  .bzone.inspected{border-color:var(--red);box-shadow:0 0 14px rgba(168,50,38,.5);animation:pulseR 1s ease-in-out 2}
   .bzone .stamp{position:absolute;top:4px;right:6px;font-size:1.4rem;opacity:0;transform:scale(2.2);transition:all .35s cubic-bezier(.2,1.6,.4,1)}
   .bzone .stamp.in{opacity:1;transform:scale(1)}
-  @keyframes pulseR{0%,100%{background:#1c150d}50%{background:#33130f}}
+  @keyframes pulseR{0%,100%{background:#f3e9cc}50%{background:#f2d3c4}}
   .chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
-  .chip{display:inline-flex;align-items:center;gap:3px;background:#2a2213;border:1px solid var(--line);border-radius:99px;padding:2px 9px;font-size:.8rem;font-weight:700;opacity:0;transform:translateY(14px) scale(.6);transition:all .4s cubic-bezier(.2,1.4,.4,1);position:relative}
+  .chip{display:inline-flex;align-items:center;gap:3px;background:var(--strip);border:1px solid var(--line);border-radius:99px;padding:2px 9px;font-size:.8rem;font-weight:700;opacity:0;transform:translateY(14px) scale(.6);transition:all .4s cubic-bezier(.2,1.4,.4,1);position:relative}
   .chip.in{opacity:1;transform:none}
-  .chip.caught{animation:shake .5s ease-in-out 2;border-color:var(--red);background:#33130f}
+  .chip.caught{animation:shake .5s ease-in-out 2;border-color:var(--red);background:#f8ddd2}
   .chip.safe2{border-color:var(--green)}
   .chip.dead{opacity:.45;filter:grayscale(1)}
   @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px) rotate(-3deg)}40%{transform:translateX(5px) rotate(3deg)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
   .float{position:absolute;left:50%;top:-4px;transform:translateX(-50%);font-size:.82rem;font-weight:900;pointer-events:none;opacity:0;white-space:nowrap;z-index:5}
   .float.go{animation:floatUp 1.6s ease-out forwards}
-  .float.gold{color:var(--gold)}.float.red{color:#e07a6a}.float.blue{color:#8fb4d8}
+  .float.gold{color:var(--gold)}.float.red{color:var(--red)}.float.blue{color:var(--blue)}
   @keyframes floatUp{0%{opacity:0;transform:translate(-50%,4px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-26px)}}
-  .toast{border:1px solid #7a6a9a;background:#191322;color:#cabce8;border-radius:8px;padding:6px 10px;font-size:.85rem;margin:5px 0;opacity:0;transform:translateX(-16px);transition:all .4s ease}
+  .toast{border:1px solid var(--purple);background:#efe9f4;color:#4a3a6a;border-radius:6px;padding:6px 10px;font-size:.85rem;margin:5px 0;opacity:0;transform:translateX(-16px);transition:all .4s ease}
   .toast.in{opacity:1;transform:none}
-  .sumline{display:flex;align-items:center;gap:6px;font-size:.92rem;padding:5px 8px;border-radius:8px;background:#191510;margin:3px 0;opacity:0;transition:opacity .4s}
+  .sumline{display:flex;align-items:center;gap:6px;font-size:.92rem;padding:5px 8px;border-radius:6px;background:var(--strip);margin:3px 0;opacity:0;transition:opacity .4s}
   .sumline.in{opacity:1}
   .sumline .sn{font-weight:800;flex:0 0 auto}.sumline .si{margin-left:auto;font-weight:900;flex:0 0 auto}
-  .si.gold{color:var(--gold)}.si.red{color:#e07a6a}.si.mut{color:var(--muted)}
+  .si.gold{color:var(--gold)}.si.red{color:var(--red)}.si.mut{color:var(--muted)}
   .seg{display:flex;gap:6px;margin:4px 0}
-  .seg button{flex:1;margin:0;font-size:.82rem;padding:8px;background:#2a2016;color:var(--muted);border:1px solid var(--line);font-weight:600}
-  .seg button.on{background:var(--gold);color:#241c10;border-color:var(--gold);font-weight:900}
+  .seg button{flex:1;margin:0;font-size:.82rem;padding:8px;background:linear-gradient(180deg,#f5ecd4,#e8d9b2);color:var(--muted);border:1.5px solid var(--line);font-weight:600;box-shadow:none;text-shadow:none}
+  .seg button.on{background:var(--goldL);color:#3a2a10;border-color:#b8860b;font-weight:900}
   .hide{display:none}
-  .voicebar{position:fixed;left:0;right:0;bottom:0;background:#1c150d;border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:10px;align-items:center;justify-content:center;z-index:50}
+  .voicebar{position:fixed;left:0;right:0;bottom:0;background:#ecdfbc;border-top:2px solid var(--wood);padding:8px 12px;display:flex;gap:10px;align-items:center;justify-content:center;z-index:50;box-shadow:0 -2px 8px rgba(74,44,20,.2)}
   .voicebar button{width:auto;margin:0;padding:8px 14px;font-size:.9rem}
   .voicebar .vi{font-size:.82rem;color:var(--muted)}
-  .voicebar .mute{background:#2a2016;color:var(--kraft);border:1px solid var(--kraft2)}
+  .voicebar .mute{background:linear-gradient(180deg,#f5ecd4,#e8d9b2);color:var(--kraft);border:1.5px solid var(--kraft);text-shadow:none}
 </style>
 </head>
 <body>
@@ -116,6 +138,7 @@
   <div class="err" id="err"></div>
 
   <div id="s-home">
+    <div class="art" id="art-home" style="display:none"><img src="art/01_cover.jpg" onload="$('art-home').style.display=''" onerror="$('art-home').remove()"></div>
     <div class="card">
       <h2>加入遊戲</h2>
       <label>你的暱稱</label><input id="name" maxlength="12" placeholder="輸入暱稱">
@@ -139,6 +162,7 @@
   </div>
 
   <div id="s-lobby" class="hide">
+    <div class="art" id="art-lobby" style="display:none"><img src="art/02_lobby.jpg" onload="$('art-lobby').style.display=''" onerror="$('art-lobby').remove()"></div>
     <div class="card"><h2>房間代碼 <span id="lobbyname" style="color:var(--muted);font-size:.85rem;font-weight:400"></span></h2><div class="code" id="roomcode">----</div>
       <div class="hint">把這代碼給朋友加入，或直接分享連結（點了免輸房號密碼）。</div>
       <div class="row2">
@@ -161,7 +185,7 @@
           <button class="ghost" style="margin-top:0" onclick="setPwd()">🔑 更新密碼</button>
         </div>
         <button onclick="doStart()">開始遊戲</button>
-        <button class="ghost" style="color:#e07a6a;border-color:#e07a6a" onclick="closeRoom()">🚪 關閉房間（釋出名額）</button>
+        <button class="ghost" style="color:#a83226;border-color:#a83226" onclick="closeRoom()">🚪 關閉房間（釋出名額）</button>
       </div>
       <div id="waithost" class="hint hide">等房主開始遊戲…</div>
     </div>
@@ -237,13 +261,15 @@
   </div>
 
   <div id="s-end" class="hide">
+    <div class="art" id="art-end" style="display:none"><img id="art-end-img" onload="$('art-end').style.display=''" onerror="$('art-end').style.display='none'"></div>
     <div class="card">
+      <div class="theend">📖 THE END</div>
       <div class="banner" id="endbanner"></div>
       <div class="hint" id="endreason"></div>
       <div class="hint" id="endrate"></div>
       <ul class="plist" id="ranking"></ul>
       <div id="hostend" class="hide"><button onclick="sock.emit('restart')">再玩一局</button>
-        <button class="ghost" style="color:#e07a6a;border-color:#e07a6a" onclick="closeRoom()">🚪 關閉房間（釋出名額）</button></div>
+        <button class="ghost" style="color:#a83226;border-color:#a83226" onclick="closeRoom()">🚪 關閉房間（釋出名額）</button></div>
     </div>
   </div>
 </div>
@@ -392,7 +418,7 @@ function renderGame(){
   const you=ST.you;
   $('myrole').innerHTML = you.isSupervisor ? `<span class="tag" style="background:#a06ea0;color:#fff">主管 ${you.supTermLeft}回</span>` : roleTag(you.role,you.seniority);
   if(you.role==='emp'){
-    $('mystats').innerHTML=`摸魚 <b>${you.slackCount}</b>　心悸 <b style="color:${you.anxiety>=ST.anxietyOut-1?'#e07a6a':'inherit'}">${you.anxiety}</b>/${ST.anxietyOut}　分 <b>${you.points}</b>${you.canBeFired?' <span class="tag t-boss">有逾期</span>':''}　${you.alive?'':'<b style="color:#e07a6a">已出局(幽靈)</b>'}`;
+    $('mystats').innerHTML=`摸魚 <b>${you.slackCount}</b>　心悸 <b style="color:${you.anxiety>=ST.anxietyOut-1?'#a83226':'inherit'}">${you.anxiety}</b>/${ST.anxietyOut}　分 <b>${you.points}</b>${you.canBeFired?' <span class="tag t-boss">有逾期</span>':''}　${you.alive?'':'<b style="color:#a83226">已出局(幽靈)</b>'}`;
   } else {
     $('mystats').innerHTML=`存活員工 <b>${ST.players.filter(p=>p.role==='emp'&&p.alive).length}</b>　任務完成 <b>${ST.tasksDone}/${ST.tasksIssued}</b>（門檻 ${Math.round(ST.completeThreshold*100)}%）${ST.supervisorName?'　主管:'+esc(ST.supervisorName):''}`;
   }
@@ -429,10 +455,10 @@ function renderGame(){
 }
 function renderPromoteFire(){
   const a=ST.admin;
-  if(a.supervisorName) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#c79cd0;margin:8px 0 2px">主管：${esc(a.supervisorName)}（任期中）</div>`;
-  else if(a.canPromote&&a.promotable.length) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#c79cd0;margin:8px 0 2px">升職令（升為主管：不能摸魚、免疫被抓、可協查抓人 +2）</div><ul class="plist">`+a.promotable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:#a06ea0;color:#fff" onclick="sock.emit('promote',{targetId:'${p.id}'})">升職</button></li>`).join('')+`</ul>`;
+  if(a.supervisorName) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#6a4a8a;margin:8px 0 2px">主管：${esc(a.supervisorName)}（任期中）</div>`;
+  else if(a.canPromote&&a.promotable.length) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#6a4a8a;margin:8px 0 2px">升職令（升為主管：不能摸魚、免疫被抓、可協查抓人 +2）</div><ul class="plist">`+a.promotable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:#a06ea0;color:#fff" onclick="sock.emit('promote',{targetId:'${p.id}'})">升職</button></li>`).join('')+`</ul>`;
   else $('promotebox').innerHTML=`<div class="hint" style="text-align:left">升職令冷卻中</div>`;
-  if(a.fireable.length&&a.bossFires>0) $('firebox').innerHTML=`<div style="font-size:.82rem;color:#e07a6a;margin:8px 0 2px">資遣（剩 ${a.bossFires} 次；限有逾期紀錄者）</div><ul class="plist">`+a.fireable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:var(--red);color:#fff" onclick="if(confirm('確定資遣 ${esc(p.name)}？'))sock.emit('fire',{targetId:'${p.id}'})">資遣</button></li>`).join('')+`</ul>`;
+  if(a.fireable.length&&a.bossFires>0) $('firebox').innerHTML=`<div style="font-size:.82rem;color:#a83226;margin:8px 0 2px">資遣（剩 ${a.bossFires} 次；限有逾期紀錄者）</div><ul class="plist">`+a.fireable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:var(--red);color:#fff" onclick="if(confirm('確定資遣 ${esc(p.name)}？'))sock.emit('fire',{targetId:'${p.id}'})">資遣</button></li>`).join('')+`</ul>`;
   else $('firebox').innerHTML='';
 }
 function renderSupZones(){
@@ -570,6 +596,7 @@ function playReveal(r){
 }
 function renderEnd(){
   const w=ST.winner;
+  const ea=$('art-end-img');if(ea){const want='art/'+(w.side==='boss'?'09_boss_end.jpg':'10_king_end.jpg');if(!ea.src.endsWith(want))ea.src=want;}
   $('endbanner').textContent=w.side==='boss'?'👔 老闆獲勝！':'🏆 員工陣營獲勝！';
   $('endreason').textContent=w.reason;
   const b=w.boss||{};
