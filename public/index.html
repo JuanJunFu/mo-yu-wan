@@ -359,7 +359,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null, empPick=null, riskyOn=false, holdSel=0, focusPct=0, focusZone=null;
+const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null, empPick=null, riskyOn=false, holdSel=0, focusPct=0, focusZone=null, moochTarget=null;
+function setMooch(id){moochTarget=id;renderEmpZones();}
 function setHold(v){holdSel=v;renderEmpZones();}
 function setFocusPct(v){focusPct=v;if(!v)focusZone=null;else if(!focusZone&&bossPicks.length)focusZone=bossPicks[0];renderBossZones();}
 function setFocusZone(z){focusZone=z;renderBossZones();}
@@ -485,7 +486,9 @@ function submitEmp(){
   if(!empPick)return err('先選這回合要去哪／做什麼');
   const rg=(empPick.action==='slack')?(ST.zones[empPick.zone].slack+(ST.you.seniority==='senior'?-1:1)):0;
   const hold=(empPick.action==='slack'&&ST.you.seniority==='junior'&&holdSel)?holdSel:0;
-  sock.emit('submitChoice',{action:empPick.action,zone:empPick.zone,helpTarget,cardIdx:selCard,risky:riskyOn&&rg>=2,hold},r=>{if(r&&r.error)return err(r.error);});}
+  const selC=(selCard!=null&&ST.you.hand)?ST.you.hand[selCard]:null;
+  if(selC&&selC.type==='mooch'&&!moochTarget)return err('🙏 先選要凹哪位同事');
+  sock.emit('submitChoice',{action:empPick.action,zone:empPick.zone,helpTarget,cardIdx:selCard,cardTarget:moochTarget,risky:riskyOn&&rg>=2,hold},r=>{if(r&&r.error)return err(r.error);});}
 function ghostAct(type,targetId){ghostMode=null;sock.emit('submitChoice',{ghostAction:{type,targetId}},r=>{if(r&&r.error)return err(r.error);});}
 function ghostWarnMenu(){ghostMode=ghostMode==='warn'?null:'warn';renderGhost();}
 function toggleCard(i){selCard=(selCard===i)?null:i;renderEmpZones();}
@@ -641,9 +644,15 @@ function renderEmpZones(){
       you.juniors.map(j=>`<button class="${helpTarget===j.id?'on':''}" onclick="toggleHelp('${j.id}')">${esc(j.name)}</button>`).join('')+
       `<button class="${!helpTarget?'on':''}" onclick="toggleHelp(null)">不罩</button></div></div>`;
   } else $('helpbox').innerHTML='';
+  // 凹同事卡選中→挑受害者
+  const selC=(selCard!=null&&you.hand)?you.hand[selCard]:null;
+  if(selC&&selC.type==='mooch'){
+    const mates=ST.players.filter(p=>p.role==='emp'&&p.alive&&p.id!==you.id);
+    $('helpbox').innerHTML+=`<div class="helpbar" style="border-color:#a06ea0;background:#f2ecf6"><b>🙏 要凹誰？</b><span class="hb-note">他這回合認真工作的話，薪水歸你</span><div class="hb-btns">${mates.map(m=>`<button style="border-color:#a06ea0;color:#6a4a8a" class="${moochTarget===m.id?'on':''}" onclick="setMooch('${m.id}')">${esc(m.name)}</button>`).join('')}</div></div>`;
+  }
   const pk=(a,z)=>empPick&&empPick.action===a&&(a!=='slack'||empPick.zone===z);
   const cells=[];
-  cells.push(`<div class="zone work ${pk('work')?'sel':''}" onclick="pickEmp('work')"><div class="ic">💼</div><div class="nm">認真工作</div><div class="m">${hasTask?'📋+2 ':''}💓−1</div></div>`);
+  cells.push(`<div class="zone work ${pk('work')?'sel':''}" onclick="pickEmp('work')"><div class="ic">💼</div><div class="nm">認真工作</div><div class="m">${hasTask?'📋+2 ':''}💰+1 💓−1</div></div>`);
   cells.push(`<div class="zone safe ${pk('idle')?'sel':''}" onclick="pickEmp('idle')"><div class="ic">🏢</div><div class="nm">回辦公室</div><div class="m">🛡️安全 💓−1</div></div>`);
   for(const k of ST.slackZones){const z=ST.zones[k];const dis=(you.lastZone===k)||you.overtime;
     cells.push(`<div class="zone ${pk('slack',k)?'sel':''}" style="${dis?'opacity:.35;pointer-events:none':''}" onclick="${dis?'':`pickEmp('slack','${k}')`}"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">💰+${z.slack} 💓+${z.anxiety}${hasTask?' 📋+1':''}${you.overtime?' 🕘':(dis?' 🚫剛待過':'')}</div></div>`);}
@@ -685,7 +694,7 @@ function pickBoss(k){const i=bossPicks.indexOf(k);if(i>=0)bossPicks.splice(i,1);
 let revAnimKey=null, revTimers=[];
 function rvT(fn,ms){revTimers.push(setTimeout(fn,ms));}
 function renderReveal(){
-  bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null; empPick=null; riskyOn=false; holdSel=0; focusPct=0; focusZone=null;
+  bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null; empPick=null; riskyOn=false; holdSel=0; focusPct=0; focusZone=null; moochTarget=null;
   const r=ST.reveal;if(!r)return;
   $('revtitle').textContent=`第 ${r.round} 回合揭曉`;
   // 詳細文字（收合備查）
@@ -708,7 +717,9 @@ function outcomeIcon(x){
   if(x.caught==='guarded')return['🦉 學長罩','blue'];
   if(x.caught==='blocked')return['🛡️ 免死','blue'];
   if(x.gain!=null)return['💰 +'+x.gain,'gold'];
-  if(x.working)return['💼 認真','mut'];
+  if(x.mooched)return['😭 被凹白做工','red'];
+  if(x.ot)return['🕘 加班 +2💰','gold'];
+  if(x.working)return['💼 認真 +1💰','mut'];
   if(x.supervisor)return['🕵️ 主管','mut'];
   return['😴 休息','mut'];
 }
@@ -806,8 +817,8 @@ const RULES_BODY=`
 <p>老闆巡到你摸魚的那區 → 這次不算 ＋ 心悸 +2（菜鳥 +3）。<b>心悸滿 6（6 人局 5）就嚇到請辭出局</b>。有人龜在辦公室，會害其他人各 +1 心悸。</p>
 <h4>🧑‍🤝‍🧑 老鳥 / 菜鳥</h4>
 <p>🐣 菜鳥：摸魚 +1 分，但老闆巡到<b>隔壁區也會抓到你</b>。🦉 老鳥：摸魚 −1 分，但有一張<b>免死金牌</b>、要被連盯兩回合才抓得到。</p>
-<h4>📋 工作（拿到任務時）</h4>
-<p>認真做（+2 進度、安全）｜ 邊做邊摸（+1 進度、有分但被抓算怠工）｜ 擺爛（易逾期）。做完任務額外 +1 分。</p>
+<h4>📋 工作（做工有薪水，不可以白嫖）</h4>
+<p>認真做＝<b>薪水 +1💰</b>、心悸 −1（有任務再 +2 進度）｜ 邊做邊摸（+1 進度、有分但被抓算怠工）｜ 擺爛（易逾期）。做完任務額外 +1💰。<b>唯一例外：被同事用 🙏凹同事卡凹到</b>——你認真做，薪水進他口袋，白做工。</p>
 <h4>🃏 手牌（開局發 2 張，完成任務再抽）</h4>
 <p>🗣️ <b>藉口卡</b>：被抓時自動使用，這次不算也不加心悸。道具卡要在選動作前點選：🧃提神飲料（心悸 −2）｜🖨️影印機卡紙（老闆少巡一區）｜💪雞精加持（摸魚成功 +2 分）。</p>
 <h4>👻 出局變幽靈（不是坐板凳）</h4>

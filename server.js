@@ -55,9 +55,11 @@ const CARD_DEFS = {
   jam:    { icon:'🖨️', kind:'item', name:'影印機卡紙', desc:'出牌：老闆本回合隨機少巡一區' },
   boost:  { icon:'💪', kind:'item', name:'雞精加持', desc:'出牌：本回合摸魚成功分數 +2' },
   overtime:{ icon:'🕘', kind:'boss', name:'加班令', desc:'指定 1 名員工本回合不能摸魚；他認真做可領加班費 +2💰 但過勞 +1💓' },
+  mooch:  { icon:'🙏', kind:'item', name:'凹同事', desc:'出牌指定同事：他這回合認真工作的話，薪水歸你、任務也幫你推 1（他白做工）' },
 };
 // ---------- 點數經濟（2026-09-11 MVP）：💰=偷懶點數（也是王位分數）、老闆用部門經費 ----------
-const PRICES = { excuse:3, energy:3, jam:2, boost:3, overtime:3 }; // energy/boost≥3：天然匯率約2-3💰/💓，低於此=套利洞
+const PRICES = { excuse:3, energy:3, jam:2, boost:3, overtime:3, mooch:2 }; // energy/boost≥3：天然匯率約2-3💰/💓，低於此=套利洞
+const WORK_WAGE = 1; // 認真工作有薪水！不可以白嫖——除非被同事凹
 const OT_REFUSE_COST = 3;     // 付 3💰「請假開溜」拒絕加班
 // 憋氣機制（A′ 限縮版）：只有菜鳥能憋（老鳥走免死金牌線）；💓 計價＝天然凸成本自我節流
 const HOLD_COST  = { 30:1, 60:2 };  // 淺憋+1💓=30%、拚命憋+2💓=60%（無論老闆來不來都扣＝防無腦刷）
@@ -72,6 +74,7 @@ function buildMarketDeck(){
   for(let i=0;i<4;i++) d.push({type:'energy', name:CARD_DEFS.energy.name});
   for(let i=0;i<3;i++) d.push({type:'jam', name:CARD_DEFS.jam.name});
   for(let i=0;i<4;i++) d.push({type:'boost', name:CARD_DEFS.boost.name});
+  for(let i=0;i<2;i++) d.push({type:'mooch', name:CARD_DEFS.mooch.name});
   return d;
 }
 function refillMarket(room){ while(room.market.length<3&&room.marketDeck.length) room.market.push(room.marketDeck.shift()); }
@@ -82,6 +85,7 @@ function buildCardDeck(){
   for (let i=0;i<4;i++) deck.push({ type:'energy', name:CARD_DEFS.energy.name });
   for (let i=0;i<3;i++) deck.push({ type:'jam', name:CARD_DEFS.jam.name });
   for (let i=0;i<4;i++) deck.push({ type:'boost', name:CARD_DEFS.boost.name });
+  for (let i=0;i<2;i++) deck.push({ type:'mooch', name:CARD_DEFS.mooch.name });
   return deck;
 }
 function drawCard(room, p){
@@ -280,7 +284,7 @@ function resolveRound(room){
   }
 
   // ② 道具出牌（結算期生效；出牌即消耗）
-  const energyOf={}, boostSet=new Set();
+  const energyOf={}, boostSet=new Set(), moochMap={};
   for(const e of emps){
     const ch=choiceOf(e); if(ch.cardIdx==null) continue;
     const c=e.hand[ch.cardIdx]; if(!c||CARD_DEFS[c.type].kind!=='item') continue;
@@ -290,6 +294,10 @@ function resolveRound(room){
     else if(c.type==='jam'&&bossZones.length){
       const rm=bossZones.splice(Math.floor(Math.random()*bossZones.length),1)[0];
       ghostNotes.push({icon:'🖨️',text:`【${e.name}】搞了影印機卡紙，老闆的【${ZONES[rm].name}】巡查泡湯`});
+    }
+    else if(c.type==='mooch'&&ch.cardTarget&&room.players.has(ch.cardTarget)&&ch.cardTarget!==e.id){
+      if(!moochMap[ch.cardTarget]) moochMap[ch.cardTarget]=e.id;
+      ghostNotes.push({icon:'🙏',text:`【${e.name}】對某位同事使出了「拜託啦」攻勢…`});
     }
   }
 
@@ -330,8 +338,19 @@ function resolveRound(room){
       if(ot){ e.points+=2; pending[e.id]+=1; r.ot=true; e.otCount=(e.otCount||0)+1; chron(room,{type:'ot',name:e.name});
         if(e.task){ e.task.progress+=2; r.note=`🕘 加班！任務 +2（${e.task.progress}/${e.task.need}）、加班費 +2💰、過勞 +1💓`; } else r.note='🕘 加班！加班費 +2💰、過勞 +1💓';
       } else {
-        pending[e.id]-=1; e.points=Math.max(0,e.points-1);
-        if(e.task){ e.task.progress+=2; r.note=`認真工作：任務 +2（${e.task.progress}/${e.task.need}）、心悸 −1、💰−1`; } else r.note='認真工作：心悸 −1、💰−1';
+        pending[e.id]-=1;
+        const mb=moochMap[e.id]?room.players.get(moochMap[e.id]):null;
+        if(mb&&mb.alive){
+          // 被同事凹：薪水進別人口袋、還幫他推任務——白做工
+          mb.points+=WORK_WAGE; if(mb.task) mb.task.progress+=1;
+          if(e.task) e.task.progress+=2;
+          r.mooched=true; r.note=`被【${mb.name}】凹了！${e.task?`任務 +2（${e.task.progress}/${e.task.need}）但`:''}薪水被拿走${mb.task?'、還幫他推進度':''}，白做工 😭`;
+          chron(room,{type:'mooch',name:e.name,by:mb.name});
+          log(room,`🙏【${mb.name}】凹了【${e.name}】：薪水 +${WORK_WAGE}💰${mb.task?'、自己任務 +1':''}`);
+        } else {
+          e.points+=WORK_WAGE;
+          if(e.task){ e.task.progress+=2; r.note=`認真工作：任務 +2（${e.task.progress}/${e.task.need}）、薪水 +${WORK_WAGE}💰、心悸 −1`; } else r.note=`認真工作：薪水 +${WORK_WAGE}💰、心悸 −1`;
+        }
       }
       e.lastZone='office';
     } else if(ch.action==='idle'||ch.zone==='office'){
@@ -453,6 +472,8 @@ function buildStory(room, side, reason, winnerEmpId){
   }[sh.kind]||'');
   const bw=c.find(e=>e.type==='bigwin');
   if(bw) P.push(`而 ${bw.name} 在${bw.zone}${bw.risky?'賭上性命':''}爽賺了 ${bw.gain}💰，嘴角的笑意藏都藏不住。`);
+  const mo=c.find(e=>e.type==='mooch');
+  if(mo) P.push(`${mo.name} 被 ${mo.by} 一句「拜託啦～」凹去做工，做得滿頭大汗——薪水卻悄悄滑進了別人的口袋。`);
   const ot=c.find(e=>e.type==='ot');
   if(ot) P.push(`${bn} 甩出了加班令。${ot.name} 含淚加班到燈火通明，領了加班費，也熬出了黑眼圈。`);
   const pm=c.find(e=>e.type==='promote');
@@ -535,11 +556,15 @@ function botEmpChoice(room, e){
   }
   const temp={greedy:1.1,steady:1.4,swing:2.6}[style]||1.5;
   const choice=softmaxPick(cands,temp);
-  // 道具：心悸快爆先喝提神；衝高爽區帶雞精；偶爾搞卡紙
-  let cardIdx=null;
+  // 道具：心悸快爆先喝提神；衝高爽區帶雞精；偶爾搞卡紙；貪懶偶爾凹同事
+  let cardIdx=null, cardTarget=null;
   const idxOf=t=>e.hand.findIndex(c=>c.type===t);
   if(hot&&idxOf('energy')>=0) cardIdx=idxOf('energy');
   else if(choice.action==='slack'&&ZONES[choice.zone].slack>=3&&idxOf('boost')>=0&&Math.random()<0.6) cardIdx=idxOf('boost');
+  else if(idxOf('mooch')>=0&&Math.random()<0.35){
+    const mates=aliveEmps(room).filter(x=>x.id!==e.id&&!x.isSupervisor);
+    if(mates.length){ cardIdx=idxOf('mooch'); cardTarget=mates[Math.floor(Math.random()*mates.length)].id; }
+  }
   else if(idxOf('jam')>=0&&Math.random()<0.2) cardIdx=idxOf('jam');
   // 老鳥 bot 會罩心悸快爆的學弟（含真人玩家）
   let helpTarget=null;
@@ -561,7 +586,7 @@ function botEmpChoice(room, e){
     else if(style==='steady'&&e.anxiety<=out-4&&Math.random()<0.25) hold=30;
     else if(style==='swing'&&Math.random()<0.2) hold=Math.random()<0.5?30:60;
   }
-  return { ...choice, helpTarget, cardIdx, risky, hold };
+  return { ...choice, helpTarget, cardIdx, cardTarget, risky, hold };
 }
 
 // bot 員工的行政階段經濟行為：深呼吸＋逛補給市場
@@ -991,14 +1016,19 @@ io.on('connection', (socket)=>{
     } else {
       const action=payload.action; const helpTarget=payload.helpTarget||null;
       const risky=!!payload.risky;
-      let cardIdx=null;
+      let cardIdx=null, cardTarget=null;
       if(payload.cardIdx!=null){
         const c=me.hand[payload.cardIdx];
         if(!c) return cb&&cb({error:'沒有這張手牌'});
         if(CARD_DEFS[c.type].kind!=='item') return cb&&cb({error:'藉口卡不用出，被抓時會自動使用'});
         cardIdx=payload.cardIdx;
+        if(c.type==='mooch'){
+          const t=room.players.get(payload.cardTarget);
+          if(!t||t.role!=='emp'||!t.alive||t.id===me.id) return cb&&cb({error:'🙏 要凹誰？選一位同事'});
+          cardTarget=t.id;
+        }
       }
-      if(action==='work'||action==='idle') room.choices.emp[me.id]={action,zone:'office',helpTarget,cardIdx};
+      if(action==='work'||action==='idle') room.choices.emp[me.id]={action,zone:'office',helpTarget,cardIdx,cardTarget};
       else if(action==='slack'){ const zone=payload.zone;
         if(me._otRound===room.round) return cb&&cb({error:`🕘 你被要求加班，本回合不能摸魚！（可付 ${OT_REFUSE_COST}💰 請假開溜）`});
         if(!ZONES[zone]||zone==='office') return cb&&cb({error:'請選一個摸魚區'});
@@ -1009,7 +1039,7 @@ io.on('connection', (socket)=>{
         let hold=0;
         if(payload.hold){ if(me.seniority!=='junior') return cb&&cb({error:'🫁 憋氣是菜鳥的求生術（老鳥有免死金牌）'});
           hold=(payload.hold===60)?60:30; }
-        room.choices.emp[me.id]={action:'slack',zone,helpTarget,cardIdx,risky,hold};
+        room.choices.emp[me.id]={action:'slack',zone,helpTarget,cardIdx,cardTarget,risky,hold};
       } else return cb&&cb({error:'無效動作'});
     }
     cb&&cb({ok:true});
