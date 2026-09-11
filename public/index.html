@@ -83,6 +83,12 @@
   .banner{text-align:center;font-size:1.4rem;font-weight:900;color:var(--wood2);margin:10px 0;letter-spacing:2px}
   .theend{text-align:center;letter-spacing:6px;color:var(--muted);font-size:.85rem;margin:2px 0 6px}
   .theend::before,.theend::after{content:' ── ';color:var(--line)}
+  /* 終局故事書：逐段淡入的童話小說 */
+  .storybox{background:linear-gradient(180deg,#fdf6df,#f3e7c2);border:1.5px solid var(--goldL);border-radius:4px;padding:12px 16px;margin:10px 0;font-size:.92rem;line-height:1.85;box-shadow:inset 0 0 24px rgba(217,165,32,.1)}
+  .storybox p{margin:7px 0;opacity:0;animation:storyIn .9s ease forwards;text-indent:1.8em}
+  .storybox p:first-child{text-indent:0}
+  .storybox p:first-child::first-letter{font-size:1.5em;color:var(--kraft)}
+  @keyframes storyIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
   .grade{display:inline-flex;width:36px;height:36px;border-radius:50%;align-items:center;justify-content:center;font-weight:900;font-size:1.15rem;flex:0 0 auto;border:2px solid rgba(74,44,20,.35);box-shadow:0 1px 2px rgba(74,44,20,.3)}
   .g-S{background:var(--goldL);color:#3a2a10}.g-A{background:var(--green);color:#fff}.g-B{background:var(--blue);color:#fff}.g-C{background:#8a7a64;color:#fff}
   .ritem{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--strip)}
@@ -317,6 +323,7 @@
       <div class="theend">📖 THE END</div>
       <div class="banner" id="endbanner"></div>
       <div class="hint" id="endreason"></div>
+      <div id="endstory"></div>
       <div class="hint" id="endrate"></div>
       <ul class="plist" id="ranking"></ul>
       <div id="hostend" class="hide"><button onclick="sock.emit('restart')">再玩一局</button>
@@ -771,6 +778,8 @@ function renderEnd(){
   const ea=$('art-end-img');if(ea){const want='art/'+(w.side==='boss'?'09_boss_end.jpg':'10_king_end.jpg');if(!ea.src.endsWith(want))ea.src=want;}
   $('endbanner').textContent=w.side==='boss'?'👔 老闆獲勝！':'🏆 員工陣營獲勝！';
   $('endreason').textContent=w.reason;
+  $('endstory').innerHTML=(w.story&&w.story.length)
+    ? '<div class="storybox">'+w.story.map((p,i)=>`<p style="animation-delay:${(i*0.7).toFixed(1)}s">${esc(p)}</p>`).join('')+'</div>' : '';
   const b=w.boss||{};
   $('endrate').innerHTML=`<div class="bosscard"><span class="grade g-${b.grade||'C'}">${b.grade||'C'}</span><div class="info"><div class="nm">👔 ${esc(b.name||'老闆')}（老闆）</div><div class="ttl">淘汰 ${b.outCount||0}/${b.total||0} 人 · 任務完成率 ${w.rate}%（${w.tasksDone}/${w.tasksIssued}）</div></div></div>`;
   $('ranking').innerHTML='<div style="color:var(--kraft);font-weight:800;margin:10px 0 6px">🏅 綜合評分</div>'+w.ranking.map(p=>`

@@ -107,6 +107,8 @@ function code4(){ const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s=''; for(let 
 function newRoomCode(){ let c; do{c=code4();}while(rooms.has(c)); return c; }
 function shuffle(a){ const b=[...a]; for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];} return b; }
 function log(room,msg){ room.log.push(msg); if(room.log.length>60)room.log.shift(); }
+// 大事記：供終局生成「本局故事」（結構化事件，與 log 分開）
+function chron(room,ev){ if(!room.chronicle)room.chronicle=[]; if(room.chronicle.length<200) room.chronicle.push({round:room.round,...ev}); }
 function touch(room){ room.lastActivity=Date.now(); }
 function lobbySnapshot(){
   return [...rooms.values()].filter(r=>!r.solo).sort((a,b)=>b.createdAt-a.createdAt).map(r=>({
@@ -212,7 +214,7 @@ function startGame(room, opts){
   room.config.anxietyOut=(n>=6)?5:ANXIETY_OUT_DEFAULT;
   room.config.completeThreshold={low:0.6,mid:0.7,high:0.8}[opts.threshold]||0.7;
   room.taskDeck=shuffle(TASKS); room.tasksIssued=0; room.tasksDone=0;
-  room.round=1; room.zoneStreak={}; room.winner=null; room.log=[];
+  room.round=1; room.zoneStreak={}; room.winner=null; room.log=[]; room.chronicle=[];
   room.supervisorId=null; room.promoteCooldown=0; room.bossFires=BOSS_FIRES;
   log(room, `遊戲開始！老闆是【${room.players.get(bossId).name}】，${room.config.rounds} 回合，老闆查 ${room.config.bossInspect} 區，業績門檻 ${Math.round(room.config.completeThreshold*100)}%。`);
   // bot 老闆開局翻「行為模式卡」給員工看（讀 AI 的樂趣）
@@ -325,7 +327,7 @@ function resolveRound(room){
     } else if(ch.action==='work'){
       safeCount++; r.zoneName='認真工作'; r.working=true;
       const ot=(e._otRound===room.round);
-      if(ot){ e.points+=2; pending[e.id]+=1; r.ot=true; e.otCount=(e.otCount||0)+1;
+      if(ot){ e.points+=2; pending[e.id]+=1; r.ot=true; e.otCount=(e.otCount||0)+1; chron(room,{type:'ot',name:e.name});
         if(e.task){ e.task.progress+=2; r.note=`🕘 加班！任務 +2（${e.task.progress}/${e.task.need}）、加班費 +2💰、過勞 +1💓`; } else r.note='🕘 加班！加班費 +2💰、過勞 +1💓';
       } else {
         pending[e.id]-=1; e.points=Math.max(0,e.points-1);
@@ -346,13 +348,15 @@ function resolveRound(room){
         const dodge=Math.max(0, holdPct-(zone===focusZone?focusPct:0));
         if(dodge>0&&Math.random()*100<dodge){
           r.caught='held'; r.note=`🫁 老闆掃過…屏住呼吸驚險躲過！（憋氣 ${holdPct}%${zone===focusZone?`−緊盯 ${focusPct}%`:''}）`;
+          chron(room,{type:'held',name:e.name,zone:z.name,pct:holdPct});
         } else {
         const exIdx=e.hand.findIndex(c=>c.type==='excuse');
-        if(exIdx>=0){ const c=e.hand.splice(exIdx,1)[0]; r.caught='excused'; r.note=`被抓，但掏出藉口「${c.name}」滑走了！`; }
-        else if(warnedSet.has(e.id)){ r.caught='warned'; r.note='被抓前收到幽靈報信，及時溜回座位！'; }
-        else if(guarded.has(e.id)){ r.caught='guarded'; r.note='被抓，但老鳥罩學弟擋下了！'; }
-        else if(e.seniority==='senior'&&e.immunity>0){ e.immunity--; r.caught='blocked'; r.note='被抓，但免死金牌擋下！'; }
+        if(exIdx>=0){ const c=e.hand.splice(exIdx,1)[0]; r.caught='excused'; r.note=`被抓，但掏出藉口「${c.name}」滑走了！`; chron(room,{type:'shield',kind:'excused',name:e.name,detail:c.name}); }
+        else if(warnedSet.has(e.id)){ r.caught='warned'; r.note='被抓前收到幽靈報信，及時溜回座位！'; chron(room,{type:'shield',kind:'warned',name:e.name}); }
+        else if(guarded.has(e.id)){ r.caught='guarded'; r.note='被抓，但老鳥罩學弟擋下了！'; chron(room,{type:'shield',kind:'guarded',name:e.name}); }
+        else if(e.seniority==='senior'&&e.immunity>0){ e.immunity--; r.caught='blocked'; r.note='被抓，但免死金牌擋下！'; chron(room,{type:'shield',kind:'blocked',name:e.name}); }
         else { const anx=(e.seniority==='junior')?3:2; pending[e.id]+=anx; r.caught=true; r.anx=anx; r.note=`被逮到！這次不算，心悸 +${anx}`;
+          chron(room,{type:'catch',name:e.name,zone:z.name});
           // 主管檢舉獎金：若在主管協查區被抓
           if(supZone&&zone===supZone&&sup){ sup.points+=2; r.byBoss=false; log(room,`🕵️ 主管【${sup.name}】協查抓到【${e.name}】(+2 分)`); }
         }
@@ -362,6 +366,7 @@ function resolveRound(room){
         if(boostSet.has(e.id)) gain+=2;
         if(ch.risky) gain*=2;
         e.slackCount++; e.points+=gain; pending[e.id]+=z.anxiety; r.gain=gain;
+        if(gain>=5) chron(room,{type:'bigwin',name:e.name,zone:z.name,gain,risky:!!ch.risky});
         r.note=`摸魚成功！💰+${gain}、心悸 +${z.anxiety}${ch.risky?'（🎲拼了×2）':''}`;
         if(e.task){ e.task.progress+=1; r.note+=`；邊做邊摸 任務 +1（${e.task.progress}/${e.task.need}）`; }
       }
@@ -391,6 +396,7 @@ function resolveRound(room){
     e.anxiety+=pending[e.id]; if(e.anxiety<0) e.anxiety=0;
     if(e.anxiety>=room.config.anxietyOut){ const rr=results.find(x=>x.name===e.name); if(rr)rr.eliminated=true;
       e.alive=false; e.isGhost=true; if(e.isSupervisor){e.isSupervisor=false; if(room.supervisorId===e.id)room.supervisorId=null;}
+      chron(room,{type:'eliminated',name:e.name});
       log(room,`💀【${e.name}】心悸爆表（${e.anxiety}）出局！`); }
   }
 
@@ -427,6 +433,41 @@ function checkWin(room){
   }
 }
 
+// 終局故事：把大事記編成一段童話小說（storybook epilogue）
+function buildStory(room, side, reason, winnerEmpId){
+  const c=room.chronicle||[];
+  const b=bossOf(room), bn=b?b.name:'老闆';
+  const emps=[...room.players.values()].filter(p=>p.role==='emp');
+  const P=[];
+  P.push(`在一間被施了魔法的老辦公室裡，${bn} 又戴上了那枚小皇冠，握緊金色放大鏡踏進走廊。今天要對付的員工是：${emps.map(p=>p.name).join('、')}。上班鐘敲響，一場貓抓老鼠的一天開始了。`);
+  const fc=c.find(e=>e.type==='catch');
+  if(fc) P.push(`第 ${fc.round} 回合，放大鏡的光停在${fc.zone}——${fc.name} 被逮個正著，慘叫聲穿透了三面隔板。`);
+  const hd=c.find(e=>e.type==='held');
+  if(hd) P.push(`最驚險的一幕在第 ${hd.round} 回合：老闆的目光掃過${hd.zone}，${hd.name} 縮在角落屏住呼吸，臉憋得比薪水條還綠——竟然硬是躲了過去。`);
+  const sh=c.find(e=>e.type==='shield');
+  if(sh) P.push({
+    excused:`${sh.name} 被抓包的瞬間掏出「${sh.detail||'萬用藉口'}」，滑得比下班打卡還快。`,
+    warned:`天花板上飄來一通幽靈密電，${sh.name} 在放大鏡到位前一秒溜回了座位。`,
+    guarded:`千鈞一髮之際，老鳥張開翅膀把 ${sh.name} 護在身後，深藏功與名。`,
+    blocked:`免死金牌在關鍵時刻閃閃發光，${sh.name} 拍拍灰塵若無其事地走回座位。`,
+  }[sh.kind]||'');
+  const bw=c.find(e=>e.type==='bigwin');
+  if(bw) P.push(`而 ${bw.name} 在${bw.zone}${bw.risky?'賭上性命':''}爽賺了 ${bw.gain}💰，嘴角的笑意藏都藏不住。`);
+  const ot=c.find(e=>e.type==='ot');
+  if(ot) P.push(`${bn} 甩出了加班令。${ot.name} 含淚加班到燈火通明，領了加班費，也熬出了黑眼圈。`);
+  const pm=c.find(e=>e.type==='promote');
+  if(pm) P.push(`第 ${pm.round} 回合，${pm.name} 被升為代理主管——同事們的眼神，從羨慕慢慢變成了警戒。`);
+  const fr=c.find(e=>e.type==='fire');
+  if(fr) P.push(`${fr.name} 收到了資遣信封。抱著紙箱走出大門時，桌上的多肉還沒來得及澆水。`);
+  const dead=c.filter(e=>e.type==='eliminated').map(e=>e.name);
+  if(dead.length) P.push(`${dead.join('、')} 心悸爆表倒下，化作了辦公室的幽靈——從此在天花板上飄來飄去，伺機替活著的同事通風報信。`);
+  if(side==='boss') P.push(`下班鐘響。${bn} 站在辦公室中央高舉業績獎盃：${reason}。員工們癱在文件堆裡，連嘆氣的力氣都沒有了。`);
+  else { const k=room.players.get(winnerEmpId);
+    P.push(`下班鐘響。${k?k.name:'某人'} 戴著歪歪的紙皇冠站上文件山頂，高舉金色咖啡杯——${reason}！${bn} 癱坐在角落，放大鏡滾落在地。`); }
+  P.push('明天太陽照常升起，影印機照常卡紙。是牛馬，還是摸魚王？——明天上班，再見分曉。');
+  return P.filter(Boolean).slice(0,9);
+}
+
 function endGame(room, side, reason, winnerEmpId){
   clearTimer(room); room.phase='ended'; touch(room);
   const th=room.config.anxietyOut;
@@ -448,6 +489,7 @@ function endGame(room, side, reason, winnerEmpId){
   const bp=bossOf(room);
   const bossGrade=(side==='boss')?((rate>=80||outCount===emps.length)?'S':'A'):(rate>=50?'B':'C');
   room.winner={ side, reason, winnerEmpId, ranking, rate, tasksDone:room.tasksDone, tasksIssued:room.tasksIssued,
+    story: buildStory(room, side, reason, winnerEmpId),
     boss:{ name:bp?bp.name:'老闆', outCount, total:emps.length, rate, grade:bossGrade } };
   log(room, `🏁 結束：${side==='boss'?'老闆獲勝':'員工陣營獲勝'} — ${reason}`);
 }
@@ -595,6 +637,7 @@ function botAdmin(room){
     const lead=[...aliveEmps(room)].filter(p=>!p.isSupervisor).sort((a,b)=>b.slackCount-a.slackCount||b.points-a.points)[0];
     if(lead&&lead.slackCount>=2&&Math.random()<0.7){
       lead.isSupervisor=true; lead.supTermLeft=SUPERVISOR_TERM; room.supervisorId=lead.id; room.promoteCooldown=PROMOTE_COOLDOWN;
+      chron(room,{type:'promote',name:lead.name});
       log(room,`🧑‍💼 老闆升【${lead.name}】為代理主管（任期 ${SUPERVISOR_TERM} 回，不能摸魚、可協查抓人）`);
     }
   }
@@ -603,7 +646,7 @@ function botAdmin(room){
     if(f&&Math.random()<0.8){
       if(f.seniority==='senior'&&f.immunity>0){ f.immunity--; f.canBeFired=false; room.bossFires--; log(room,`🛡️【${f.name}】用免死金牌擋下資遣！`); }
       else { f.alive=false; f.isGhost=true; if(f.isSupervisor){f.isSupervisor=false; if(room.supervisorId===f.id)room.supervisorId=null;}
-        room.bossFires--; log(room,`🔨 老闆資遣了【${f.name}】！（剩 ${room.bossFires} 次）`); }
+        room.bossFires--; chron(room,{type:'fire',name:f.name}); log(room,`🔨 老闆資遣了【${f.name}】！（剩 ${room.bossFires} 次）`); }
     }
   }
   // 部門經費夠就從固定槽補一張加班令，手上有就對「當前偷懶王」打出（記仇橡皮筋）
@@ -827,6 +870,7 @@ io.on('connection', (socket)=>{
     if(!t||t.role!=='emp'||!t.alive||t.isSupervisor) return cb&&cb({error:'不可升職此人'});
     if(room.supervisorId) return cb&&cb({error:'已經有主管了'});
     t.isSupervisor=true; t.supTermLeft=SUPERVISOR_TERM; room.supervisorId=t.id; room.promoteCooldown=PROMOTE_COOLDOWN;
+    chron(room,{type:'promote',name:t.name});
     log(room,`🧑‍💼 老闆升【${t.name}】為代理主管（任期 ${SUPERVISOR_TERM} 回，不能摸魚、可協查抓人）`);
     cb&&cb({ok:true}); broadcast(room);
   });
@@ -839,7 +883,7 @@ io.on('connection', (socket)=>{
     if(!t||t.role!=='emp'||!t.alive||!t.canBeFired) return cb&&cb({error:'此人不可資遣（需有逾期紀錄）'});
     if(t.seniority==='senior'&&t.immunity>0){ t.immunity--; t.canBeFired=false; room.bossFires--; log(room,`🛡️【${t.name}】用免死金牌擋下資遣！`); return cb&&cb({ok:true, blocked:true}), broadcast(room); }
     t.alive=false; t.isGhost=true; if(t.isSupervisor){t.isSupervisor=false; if(room.supervisorId===t.id)room.supervisorId=null;}
-    room.bossFires--; log(room,`🔨 老闆資遣了【${t.name}】！（剩 ${room.bossFires} 次）`);
+    room.bossFires--; chron(room,{type:'fire',name:t.name}); log(room,`🔨 老闆資遣了【${t.name}】！（剩 ${room.bossFires} 次）`);
     cb&&cb({ok:true}); broadcast(room);
     checkWin(room); broadcast(room);
   });
