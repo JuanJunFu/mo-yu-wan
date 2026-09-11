@@ -131,12 +131,15 @@
   .chip{display:inline-flex;align-items:center;gap:3px;background:var(--strip);border:1px solid var(--line);border-radius:99px;padding:2px 9px;font-size:.8rem;font-weight:700;opacity:0;transform:translateY(14px) scale(.6);transition:all .4s cubic-bezier(.2,1.4,.4,1);position:relative}
   .chip.in{opacity:1;transform:none}
   .chip.caught{animation:shake .5s ease-in-out 2;border-color:var(--red);background:#f8ddd2}
+  /* 呼吸感演出：被巡區玩家先屏息顫抖再判生死 */
+  .chip.hold{animation:holdBreath 1.6s ease-in-out infinite;border-color:var(--goldL);background:#fdf3d0}
+  @keyframes holdBreath{0%,100%{transform:scale(1)}20%{transform:scale(.955) rotate(-1.2deg)}45%{transform:scale(1.03)}70%{transform:scale(.96) rotate(1.2deg)}}
   .chip.safe2{border-color:var(--green)}
   .chip.dead{opacity:.45;filter:grayscale(1)}
   @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px) rotate(-3deg)}40%{transform:translateX(5px) rotate(3deg)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
   .float{position:absolute;left:50%;top:-4px;transform:translateX(-50%);font-size:.82rem;font-weight:900;pointer-events:none;opacity:0;white-space:nowrap;z-index:5}
   .float.go{animation:floatUp 1.6s ease-out forwards}
-  .float.gold{color:var(--gold)}.float.red{color:var(--red)}.float.blue{color:var(--blue)}
+  .float.gold{color:var(--gold)}.float.red{color:var(--red)}.float.blue{color:var(--blue)}.float.mut{color:var(--muted)}
   @keyframes floatUp{0%{opacity:0;transform:translate(-50%,4px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-26px)}}
   .toast{border:1px solid var(--purple);background:#efe9f4;color:#4a3a6a;border-radius:6px;padding:6px 10px;font-size:.85rem;margin:5px 0;opacity:0;transform:translateX(-16px);transition:all .4s ease}
   .toast.in{opacity:1;transform:none}
@@ -706,19 +709,27 @@ function playReveal(r,instant){
   (r.bossZoneKeys||[]).forEach(k=>{rvT(()=>{const z=$('rz_'+k),s=$('st_'+k);if(z)z.classList.add('inspected');if(s){s.textContent='🔦';s.classList.add('in');}},D(t));});
   if(r.supZoneKey){rvT(()=>{const z=$('rz_'+r.supZoneKey),s=$('st_'+r.supZoneKey);if(z)z.classList.add('inspected');if(s){s.textContent=(s.textContent||'')+'🕵️';s.classList.add('in');}},D(t+250));}
   t+=1100;
-  // ⑤ 個人結果：震動／飄分／特效
+  // ⑤ 個人結果：被巡區玩家先「🫁 屏住呼吸」1.6 秒吊胃口，再判生死（呼吸感演出，數學不動）
+  const inspSet=new Set([...(r.bossZoneKeys||[]),r.supZoneKey].filter(Boolean));
+  const anyDanger=r.results.some(x=>x.zone&&inspSet.has(x.zone)&&!x.supervisor);
   r.results.forEach((x,i)=>{
+    const inDanger=x.zone&&inspSet.has(x.zone)&&!x.supervisor;
+    if(inDanger){
+      rvT(()=>{const el=$('rc_'+i);if(!el)return;el.classList.add('hold');
+        const f=document.createElement('span');f.className='float go mut';f.textContent='🫁 屏住呼吸…';el.appendChild(f);},D(t+i*100));
+    }
     rvT(()=>{
       const el=$('rc_'+i);if(!el)return;
+      el.classList.remove('hold');
       const[txt,color]=outcomeIcon(x);
       if(x.caught===true)el.classList.add('caught');
       else if(x.gain!=null)el.classList.add('safe2');
       const f=document.createElement('span');f.className='float go '+color;f.textContent=txt;
       el.appendChild(f);
       if(x.eliminated)rvT(()=>{el.classList.add('dead');el.innerHTML='👻 '+esc(x.name);},D(900));
-    },D(t+i*220));
+    },D((inDanger?t+1600:t)+i*220));
   });
-  t+=n*220+700;
+  t+=n*220+700+(anyDanger?1600:0);
   // ⑥ 一行式戰果總結
   rvT(()=>{
     $('revsum').innerHTML=`<div class="sumline in" style="justify-content:center;color:var(--muted)">🔦 ${r.bossZones.join('、')||'沒巡'}${r.supZone?'｜🕵️ '+r.supZone:''}｜📋 ${r.rate}%</div>`
