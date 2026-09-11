@@ -18,7 +18,7 @@
   h1::before{content:'❦  ';color:var(--goldL);font-size:.7em}h1::after{content:'  ❦';color:var(--goldL);font-size:.7em}
   .jp{text-align:center;color:var(--kraft);letter-spacing:5px;font-size:.8rem;margin-bottom:12px}
   .jp::after{content:'';display:block;width:180px;margin:8px auto 0;border-bottom:2px double var(--line)}
-  .card{background:var(--paper);border:3px solid var(--wood);border-radius:6px;padding:16px;margin:14px 0;position:relative;
+  .card{background:var(--paper);border:3px solid var(--wood);border-radius:6px;padding:12px 14px;margin:10px 0;position:relative;
     box-shadow:0 2px 10px rgba(74,44,20,.28),inset 0 0 0 1px #cdb27e,inset 0 0 46px rgba(160,120,60,.14)}
   h2{color:var(--kraft);font-size:1.05rem;margin:0 0 10px}
   label{display:block;font-size:.82rem;color:var(--muted);margin:10px 0 4px}
@@ -36,19 +36,27 @@
   .plist li{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;background:var(--strip)}
   .tag{font-size:.7rem;font-weight:800;padding:1px 8px;border-radius:99px;margin-left:6px}
   .t-boss{background:var(--red);color:#fff}.t-senior{background:var(--blue);color:#fff}.t-junior{background:var(--green);color:#fff}.t-host{background:var(--goldL);color:#3a2a10}
-  .zones{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
-  /* 木頭棋盤格 */
-  .zone{border:2px solid var(--kraft);border-radius:8px;padding:11px 8px;text-align:center;cursor:pointer;user-select:none;background:linear-gradient(180deg,#f3e9cc,#e7d7ad);box-shadow:0 1px 3px rgba(74,44,20,.2),inset 0 1px 0 #fff6dc}
+  .zones{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}
+  /* 木頭棋盤格（緊湊：手機一屏放完） */
+  .zone{border:2px solid var(--kraft);border-radius:8px;padding:7px 6px;text-align:center;cursor:pointer;user-select:none;background:linear-gradient(180deg,#f3e9cc,#e7d7ad);box-shadow:0 1px 3px rgba(74,44,20,.2),inset 0 1px 0 #fff6dc}
   .zone.safe{border-color:var(--green)} .zone.work{border-color:var(--blue)}
   .zone.sel{outline:3px solid var(--goldL);background:#fdf3d0}
-  .zone .ic{font-size:1.5rem}.zone .nm{font-weight:800}.zone .m{font-size:.72rem;color:var(--muted)}
-  .me{display:flex;gap:12px;flex-wrap:wrap;font-size:.88rem;margin:6px 0;color:var(--muted)}
+  .zone .ic{font-size:1.3rem}.zone .nm{font-weight:800}.zone .m{font-size:.74rem;color:var(--muted)}
+  .me{display:flex;gap:12px;flex-wrap:wrap;font-size:.88rem;margin:2px 0;color:var(--muted);align-items:center}
   .me b{color:var(--ink)}
-  .status{text-align:center;color:var(--gold);font-weight:800;margin:8px 0}
+  .status{text-align:center;color:var(--gold);font-weight:900;margin:4px 0;font-size:1.1rem}
+  .prep{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+  .prep span{background:var(--strip);border:1px solid var(--line);border-radius:99px;padding:3px 12px;font-size:.85rem;color:var(--ink)}
+  /* 罩學弟：醒目大按鈕列 */
+  .helpbar{border:2px solid var(--blue);background:#e9eff5;border-radius:8px;padding:8px 10px;margin:8px 0}
+  .helpbar .hb-note{font-size:.75rem;color:var(--muted);margin-left:6px}
+  .helpbar .hb-btns{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+  .helpbar .hb-btns button{flex:1;min-width:80px;margin:0;padding:10px 8px;font-size:.92rem;background:#f2f6fa;color:var(--blue);border:1.5px solid var(--blue);box-shadow:none;text-shadow:none;font-weight:800}
+  .helpbar .hb-btns button.on{background:var(--blue);color:#fff}
   .timer{text-align:center;font-family:ui-monospace,Consolas,monospace;font-size:1.3rem;font-weight:900;color:var(--gold)}
   .timer.low{color:var(--red)}
   /* 魔法任務卷軸 */
-  .task{background:linear-gradient(180deg,#fdf6df,#f1e4bc);border:1.5px solid var(--goldL);border-radius:4px;padding:10px 14px;margin:8px 0;position:relative;
+  .task{background:linear-gradient(180deg,#fdf6df,#f1e4bc);border:1.5px solid var(--goldL);border-radius:4px;padding:10px 14px;margin:7px 0;position:relative;
     box-shadow:0 1px 4px rgba(74,44,20,.22),inset 0 0 20px rgba(217,165,32,.12)}
   .task::before,.task::after{content:'';position:absolute;left:-2px;right:-2px;height:7px;background:linear-gradient(180deg,#8a5a30,#6b4423);border-radius:99px;box-shadow:0 1px 2px rgba(60,35,15,.4)}
   .task::before{top:-5px}.task::after{bottom:-5px}
@@ -134,7 +142,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>摸魚王</h1><div class="jp">サボり王 · 線上房間</div>
+  <div id="hdr"><h1>摸魚王</h1><div class="jp">サボり王 · 線上房間</div></div>
   <div class="err" id="err"></div>
 
   <div id="s-home">
@@ -400,6 +408,8 @@ function roleTag(role,sen){if(role==='boss')return '<span class="tag t-boss">老
 
 function render(){
   $('voicebar').classList.toggle('hide', !ST);
+  // 遊戲中收起大標題，把垂直空間讓給選擇區（手機一屏放完）
+  $('hdr').classList.toggle('hide', !!(ST&&ST.phase!=='lobby'&&ST.phase!=='ended'));
   if(!ST){show('s-home');return}
   if(ST.phase==='lobby'){renderLobby();show('s-lobby');}
   else if(ST.phase==='ended'){renderEnd();show('s-end');}
@@ -434,17 +444,18 @@ function renderGame(){
   const you=ST.you;
   $('myrole').innerHTML = you.isSupervisor ? `<span class="tag" style="background:#a06ea0;color:#fff">主管 ${you.supTermLeft}回</span>` : roleTag(you.role,you.seniority);
   if(you.role==='emp'){
-    // 資訊分層：心悸（生死線）最大最前，分數弱化
-    const anxHot=you.anxiety>=ST.anxietyOut-1, anxWarn=you.anxiety>=ST.anxietyOut-2;
-    $('mystats').innerHTML=`<b style="font-size:1.08rem;color:${anxHot?'#a83226':(anxWarn?'#b8860b':'inherit')}">💓 心悸 ${you.anxiety}/${ST.anxietyOut}${anxHot&&you.alive?'（再爆就出局！）':''}</b>　摸魚 <b>${you.slackCount}</b>　<span style="opacity:.75">分 ${you.points}</span>${you.canBeFired?' <span class="tag t-boss">有逾期</span>':''}　${you.alive?'':'<b style="color:#a83226">已出局(幽靈)</b>'}`;
+    // 圖示化：心悸＝愛心格（一眼看離出局多遠），文字降到最少
+    const a=Math.min(you.anxiety,ST.anxietyOut), anxHot=you.anxiety>=ST.anxietyOut-1;
+    const pips='💓'.repeat(a)+'🤍'.repeat(Math.max(0,ST.anxietyOut-a));
+    $('mystats').innerHTML=`<b style="font-size:1.15rem;letter-spacing:1px">${pips}</b>${anxHot&&you.alive?' <b style="color:#a83226">⚠️</b>':''}　🐟<b>${you.slackCount}</b>　<span style="opacity:.7">💰${you.points}</span>${you.canBeFired?' <span class="tag t-boss">逾期</span>':''}${you.alive?'':' <b style="color:#a83226">👻</b>'}`;
   } else {
     $('mystats').innerHTML=`存活員工 <b>${ST.players.filter(p=>p.role==='emp'&&p.alive).length}</b>　任務完成 <b>${ST.tasksDone}/${ST.tasksIssued}</b>（門檻 ${Math.round(ST.completeThreshold*100)}%）${ST.supervisorName?'　主管:'+esc(ST.supervisorName):''}`;
   }
-  // 老闆行為模式卡（bot 老闆專屬，翻給員工看：讀 AI 習性抓空檔）
+  // 老闆行為模式卡（bot 老闆專屬）：一行圖示化
   $('patternbox').innerHTML = (ST.bossPattern&&you.role==='emp')
-    ? `<div class="task" style="border-color:var(--purple)">📇 <b>老闆行為模式：${esc(ST.bossPattern.name)}</b><div style="font-size:.82rem;color:var(--muted)">${esc(ST.bossPattern.hint)}</div></div>` : '';
+    ? `<div class="task" style="border-color:var(--purple);padding:7px 14px">📇 <b>${esc(ST.bossPattern.name)}</b>　<span style="font-size:.82rem;color:var(--muted)">${esc(ST.bossPattern.hint)}</span></div>` : '';
   const mt=$('mytask');
-  if(you.role==='emp'&&you.task){const t=you.task;mt.innerHTML=`<div class="task">📋 你的任務：<b>${esc(t.name)}</b>${t.state==='grace'?' <span class="tag t-boss">補交中</span>':''}<div>進度 ${t.progress}/${t.need}　剩 ${t.deadlineLeft} 回合<div class="bar"><div class="fill" style="width:${Math.min(100,t.progress/t.need*100)}%"></div></div></div></div>`;}
+  if(you.role==='emp'&&you.task){const t=you.task;mt.innerHTML=`<div class="task" style="padding:7px 14px">📋 <b>${esc(t.name)}</b>${t.state==='grace'?' <span class="tag t-boss">補交⚠️</span>':''}　<span style="font-size:.85rem">${t.progress}/${t.need}｜⏳${t.deadlineLeft}回</span><div class="bar"><div class="fill" style="width:${Math.min(100,t.progress/t.need*100)}%"></div></div></div>`;}
   else mt.innerHTML='';
 
   ['admin','empchoose','supchoose','bosschoose','ghostchoose','reveal'].forEach(x=>$(x).classList.add('hide'));
@@ -458,21 +469,22 @@ function renderGame(){
       $('assignlist').innerHTML=ST.admin.needTask.length?ST.admin.needTask.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px" onclick="sock.emit('assignTask',{targetId:'${p.id}'})">派任務</button></li>`).join(''):'<li style="color:var(--muted)">所有員工都有任務了</li>';
       renderPromoteFire();
     } else {
-      // 員工備戰面板：把等待變成規劃下一步
+      // 員工備戰列：圖示徽章一行看完，不寫句子
       const lz=you.lastZone&&you.lastZone!=='office'?ST.zones[you.lastZone].name:null;
       const gap=ST.anxietyOut-you.anxiety;
-      $('adminwait').innerHTML='👔 老闆行政中（派工作／升職／資遣）…'
-        +'<div style="text-align:left;margin-top:8px;font-size:.85rem;color:var(--ink)">📝 備戰一下：'
-        +`<div>・${lz?`上回待過【${lz}】，本回不能再去`:'上回在辦公室，五區都能去'}</div>`
-        +`<div>・離心悸爆表還剩 <b style="color:${gap<=1?'#a83226':'inherit'}">${gap}</b> 點${gap<=2?'（考慮認真工作或休息回血）':''}</div>`
-        +(you.task?`<div>・任務「${esc(you.task.name)}」${you.task.progress}/${you.task.need}，剩 ${you.task.deadlineLeft} 回合${you.task.state==='grace'?'（補交中！這回快做）':''}</div>`:'<div>・目前沒任務，是偷懶的好時機</div>')
-        +(you.hand&&you.hand.length?`<div>・手牌 ${you.hand.length} 張：${you.hand.map(c=>c.icon).join(' ')}</div>`:'')
+      $('adminwait').innerHTML='👔 老闆在派工作…'
+        +'<div class="prep">'
+        +(lz?`<span>🚫 ${lz}</span>`:'')
+        +`<span style="${gap<=2?'color:#a83226;font-weight:800':''}">💓 剩 ${gap} 格</span>`
+        +(you.task?`<span${you.task.state==='grace'?' style="color:#a83226;font-weight:800"':''}>📋 ${you.task.progress}/${you.task.need}·剩${you.task.deadlineLeft}回${you.task.state==='grace'?'⚠️':''}</span>`:'')
+        +(you.hand&&you.hand.length?`<span>🃏 ${you.hand.map(c=>c.icon).join('')}</span>`:'')
         +'</div>';
     }
     $('status').textContent='';
   } else if(ST.phase==='choosing'){
-    const waiting=ST.players.filter(p=>!p.submitted&&p.alive).map(p=>p.name);
-    $('status').textContent=you.submitted?('已送出，等：'+waiting.join('、')):'請做選擇';
+    const waiting=ST.players.filter(p=>!p.submitted&&p.alive).length;
+    $('status').textContent=you.submitted?`✅ 已送出，等 ${waiting} 人…`
+      :(you.role==='boss'?'😼 你要巡哪裡？':(you.isSupervisor?'🕵️ 要不要協查？':'🤫 這回合你要去哪？'));
     if(!you.alive){
       if(you.isGhost){renderGhost();$('ghostchoose').classList.remove('hide');$('status').textContent='你是幽靈 👻 可作祟攪局';}
       else $('status').textContent='觀戰中…';
@@ -521,25 +533,28 @@ function renderGhost(){
 function renderHand(){
   const you=ST.you, sub=you.submitted, hand=you.hand||[];
   if(!hand.length){$('handbox').innerHTML='';return;}
-  $('handbox').innerHTML='<div style="font-size:.78rem;color:var(--kraft2);margin:4px 0 2px">🃏 手牌（道具點了再選動作＝本回合使用）</div><div class="hand">'
-    +hand.map((c,i)=>c.kind==='item'
-      ?`<div class="hcard ${selCard===i?'sel':''}" onclick="${sub?'':`toggleCard(${i})`}"><span class="hn">${c.icon} ${esc(c.name)}</span><div class="hd">${c.desc}</div></div>`
-      :`<div class="hcard passive"><span class="hn">${c.icon} ${esc(c.name)}</span><div class="hd">藉口·${c.desc}</div></div>`).join('')+'</div>';
+  // 藉口卡＝被抓自動觸發，收成一顆小徽章省空間；道具卡才需要點
+  const excuses=hand.filter(c=>c.kind!=='item').length;
+  const items=hand.map((c,i)=>({c,i})).filter(x=>x.c.kind==='item');
+  $('handbox').innerHTML='<div class="hand">'
+    +(excuses?`<div class="hcard passive"><span class="hn">🗣️ 藉口×${excuses}</span><div class="hd">被抓自動擋</div></div>`:'')
+    +items.map(({c,i})=>`<div class="hcard ${selCard===i?'sel':''}" onclick="${sub?'':`toggleCard(${i})`}"><span class="hn">${c.icon} ${esc(c.name)}</span><div class="hd">${c.desc.replace('出牌：','')}</div></div>`).join('')
+    +'</div>';
 }
 function renderEmpZones(){
   const you=ST.you, sub=you.submitted, hasTask=!!you.task;
   renderHand();
   if(you.juniors&&you.juniors.length){
-    $('helpbox').innerHTML='<div style="font-size:.82rem;color:var(--blue);margin:6px 0">🦉 罩學弟（選填，擋他一次被抓）：<span style="display:inline-flex;flex-wrap:wrap">'+
-      you.juniors.map(j=>`<button style="width:auto;padding:4px 10px;margin:2px;font-size:.82rem" class="${helpTarget===j.id?'on':''}" onclick="toggleHelp('${j.id}')">${esc(j.name)}</button>`).join('')+
-      `<button style="width:auto;padding:4px 10px;margin:2px;font-size:.82rem" class="${!helpTarget?'on':''}" onclick="toggleHelp(null)">不罩</button></span></div>`;
+    $('helpbox').innerHTML='<div class="helpbar"><b>🦉 罩學弟</b><span class="hb-note">擋他一次被抓</span><div class="hb-btns">'+
+      you.juniors.map(j=>`<button class="${helpTarget===j.id?'on':''}" onclick="toggleHelp('${j.id}')">${esc(j.name)}</button>`).join('')+
+      `<button class="${!helpTarget?'on':''}" onclick="toggleHelp(null)">不罩</button></div></div>`;
   } else $('helpbox').innerHTML='';
   const pk=(a,z)=>empPick&&empPick.action===a&&(a!=='slack'||empPick.zone===z);
   const cells=[];
-  cells.push(`<div class="zone work ${pk('work')?'sel':''}" onclick="pickEmp('work')"><div class="ic">💼</div><div class="nm">認真工作</div><div class="m">${hasTask?'任務+2·心悸−1·分−1':'心悸−1·分−1·安全'}</div></div>`);
-  cells.push(`<div class="zone safe ${pk('idle')?'sel':''}" onclick="pickEmp('idle')"><div class="ic">🏢</div><div class="nm">回辦公室休息</div><div class="m">安全·心悸−1·不算摸魚</div></div>`);
+  cells.push(`<div class="zone work ${pk('work')?'sel':''}" onclick="pickEmp('work')"><div class="ic">💼</div><div class="nm">認真工作</div><div class="m">${hasTask?'📋+2 ':''}💓−1</div></div>`);
+  cells.push(`<div class="zone safe ${pk('idle')?'sel':''}" onclick="pickEmp('idle')"><div class="ic">🏢</div><div class="nm">回辦公室</div><div class="m">🛡️安全 💓−1</div></div>`);
   for(const k of ST.slackZones){const z=ST.zones[k];const dis=(you.lastZone===k);
-    cells.push(`<div class="zone ${pk('slack',k)?'sel':''}" style="${dis?'opacity:.35;pointer-events:none':''}" onclick="${dis?'':`pickEmp('slack','${k}')`}"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">摸魚+1·分${z.slack}·心悸+${z.anxiety}${hasTask?'·任務+1':''}${dis?'(剛待過)':''}</div></div>`);}
+    cells.push(`<div class="zone ${pk('slack',k)?'sel':''}" style="${dis?'opacity:.35;pointer-events:none':''}" onclick="${dis?'':`pickEmp('slack','${k}')`}"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">💰+${z.slack} 💓+${z.anxiety}${hasTask?' 📋+1':''}${dis?' 🚫剛待過':''}</div></div>`);}
   $('empzones').innerHTML=cells.join('');
   // 送出鈕文字＝當前選擇摘要（含將出的道具卡）；送出後仍可改選重送（大家都交齊前有效）
   const btn=$('empsubmit');
@@ -554,7 +569,7 @@ function renderEmpZones(){
 }
 function renderBossZones(){
   $('bosszones').innerHTML=ST.slackZones.map(k=>{const z=ST.zones[k];const streak=(ST.zoneStreak&&ST.zoneStreak[k])||0;const locked=streak>=2;const sel=bossPicks.includes(k);
-    return `<div class="zone ${sel?'sel':''}" style="${locked?'opacity:.35;pointer-events:none':''}" onclick="pickBoss('${k}')"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">${locked?'已連查2回·鎖':'點選巡查'}</div></div>`;}).join('');
+    return `<div class="zone ${sel?'sel':''}" style="${locked?'opacity:.35;pointer-events:none':''}" onclick="pickBoss('${k}')"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">${locked?'🚫連查2回':''}</div></div>`;}).join('');
 }
 function pickBoss(k){const i=bossPicks.indexOf(k);if(i>=0)bossPicks.splice(i,1);else{if(bossPicks.length>=ST.bossInspect)bossPicks.shift();bossPicks.push(k);}renderBossZones();}
 let revAnimKey=null, revTimers=[];
@@ -665,7 +680,7 @@ const RULES_BODY=`
 <h4>🔄 每回合怎麼跑</h4>
 <ul><li>老闆先派工作給員工</li><li>大家同時偷偷選：員工→認真工作 / 去某區摸魚 / 辦公室發呆；老闆→要巡哪幾區</li><li>一起翻開、自動結算</li></ul>
 <h4>🗺️ 地點（越爽越危險）</h4>
-<p><span class="z">🏢 辦公室：安全、不算摸魚　｜　🖨️影印/☕茶水：摸魚 +2 分、心悸 +1　｜　🚻廁所/🪟頂樓：+3 分、心悸 +2</span></p>
+<p><span class="z">🏢 辦公室：安全　｜　☕茶水 💰1/💓1　｜　🖨️影印 💰2/💓1　｜　🚻廁所 💰3/💓2　｜　🪟頂樓 💰4/💓3</span></p>
 <h4>🚨 被抓 & 出局</h4>
 <p>老闆巡到你摸魚的那區 → 這次不算 ＋ 心悸 +2（菜鳥 +3）。<b>心悸滿 6（6 人局 5）就嚇到請辭出局</b>。有人龜在辦公室，會害其他人各 +1 心悸。</p>
 <h4>🧑‍🤝‍🧑 老鳥 / 菜鳥</h4>
@@ -685,7 +700,7 @@ const RULES_BODY=`
 <h4>🏅 下班後 · 綜合評分</h4>
 <p>每人算綜合分＝摸魚分 ＋ 摸魚次數×2 ＋ 存活獎勵 − 心悸，給 S/A/B/C 等級與稱號。</p>`;
 function injectRules(){
-  if($('rules-home')) $('rules-home').innerHTML='<details class="rules" open><summary>📖 遊戲規則與獲勝條件</summary><div class="body">'+RULES_BODY+'</div></details>';
+  if($('rules-home')) $('rules-home').innerHTML='<details class="rules"><summary>📖 遊戲規則與獲勝條件</summary><div class="body">'+RULES_BODY+'</div></details>';
   if($('rules-lobby')) $('rules-lobby').innerHTML='<details class="rules"><summary>📖 遊戲規則與獲勝條件（點開複習）</summary><div class="body">'+RULES_BODY+'</div></details>';
 }
 injectRules();

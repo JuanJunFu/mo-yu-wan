@@ -13,12 +13,13 @@ const io = new Server();
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- 常數 ----------
+// 四區分數梯度拉開（2026-09-11 試玩回饋）：風險報酬遞增，每區都有選的理由
 const ZONES = {
   office: { name: '辦公室', slack: 0, anxiety: 0, safe: true },
-  tea:    { name: '茶水間', slack: 2, anxiety: 1 },
+  tea:    { name: '茶水間', slack: 1, anxiety: 1 },
   copy:   { name: '影印間', slack: 2, anxiety: 1 },
   toilet: { name: '廁所',   slack: 3, anxiety: 2 },
-  roof:   { name: '頂樓',   slack: 3, anxiety: 2 },
+  roof:   { name: '頂樓',   slack: 4, anxiety: 3 },
 };
 const SLACK_ZONES = ['tea', 'copy', 'toilet', 'roof'];
 const ADJ = { office:['copy'], copy:['office','tea'], tea:['copy','toilet'], toilet:['tea','roof'], roof:['toilet'] };
@@ -71,10 +72,10 @@ const GHOST_ACTIONS = { haunt:'👻 騷擾老闆', warn:'📞 通風報信', dis
 
 // ---------- c-lite 單人模式：老闆行為模式卡（開局翻給員工看＝「讀 AI」的樂趣） ----------
 const BOSS_PATTERNS = {
-  routine: { name:'輪班表老闆', hint:'照固定路線輪流巡（茶水→影印→廁所→頂樓），被連查兩回的地方會跳過' },
-  hunter:  { name:'記仇老闆',   hint:'特別愛查「上回合有人摸魚得逞」的地方' },
-  lazy:    { name:'佛系老闆',   hint:'懶得走遠，大多只巡茶水間和影印間，偶爾才殺上頂樓' },
-  chaos:   { name:'陰晴不定老闆', hint:'完全沒有規律，全憑當天心情亂巡' },
+  routine: { name:'輪班表老闆', hint:'照表巡：☕→🖨️→🚻→🪟 輪著來' },
+  hunter:  { name:'記仇老闆',   hint:'愛查上回有人得逞的地方' },
+  lazy:    { name:'佛系老闆',   hint:'多半只巡 ☕茶水 🖨️影印' },
+  chaos:   { name:'陰晴不定老闆', hint:'完全隨機，看心情' },
 };
 const BOT_EMP_ROSTER = [ ['greedy','🤖薪水小偷'], ['steady','🤖乖乖牌'], ['swing','🤖薛丁鵝'] ];
 const BOT_BOSS_NAME = '🤖鵝霸老闆';
