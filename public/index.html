@@ -276,6 +276,7 @@
       <div id="bosschoose" class="hide">
         <div class="hint" id="bosshint"></div>
         <div class="zones" id="bosszones"></div>
+        <div id="bossfocus"></div>
         <button id="bosssubmit" onclick="submitBoss()">確定巡這些地方</button>
       </div>
 
@@ -346,7 +347,10 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null, empPick=null, riskyOn=false;
+const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null, empPick=null, riskyOn=false, holdSel=0, focusPct=0, focusZone=null;
+function setHold(v){holdSel=v;renderEmpZones();}
+function setFocusPct(v){focusPct=v;if(!v)focusZone=null;else if(!focusZone&&bossPicks.length)focusZone=bossPicks[0];renderBossZones();}
+function setFocusZone(z){focusZone=z;renderBossZones();}
 function buyCard(i){sock.emit('buyCard',{idx:i},r=>{if(r&&r.error)err(r.error);});}
 function breathe(){sock.emit('breathe',r=>{if(r&&r.error)err(r.error);});}
 function refuseOT(){sock.emit('refuseOvertime',r=>{if(r&&r.error)err(r.error);});}
@@ -460,13 +464,16 @@ function refreshRooms(){
 sock.on('kicked',({reason})=>{ST=null;clearSess();show('s-home');err(reason||'房間已關閉');refreshRooms();});
 setInterval(()=>{if(!ST)refreshRooms();},5000);
 function doStart(){sock.emit('startGame',{bossMode:seg.bossmode,seniorityMode:seg.senmode,threshold:seg.threshold},r=>{if(r&&r.error)return err(r.error);});}
-function submitBoss(){if(bossPicks.length!==ST.bossInspect)return err('請選 '+ST.bossInspect+' 個地方');sock.emit('submitChoice',{zones:bossPicks},r=>{if(r&&r.error)return err(r.error);});}
+function submitBoss(){if(bossPicks.length!==ST.bossInspect)return err('請選 '+ST.bossInspect+' 個地方');
+  const focus=(focusPct>0&&focusZone&&bossPicks.includes(focusZone))?{zone:focusZone,pct:focusPct}:null;
+  sock.emit('submitChoice',{zones:bossPicks,focus},r=>{if(r&&r.error)return err(r.error);});}
 // 員工兩段式：pickEmp 只記選擇並高亮，submitEmp 才真正送出（送出後、大家都交齊前仍可改選重送）
 function pickEmp(action,zone){empPick={action,zone:zone||null};renderEmpZones();}
 function submitEmp(){
   if(!empPick)return err('先選這回合要去哪／做什麼');
   const rg=(empPick.action==='slack')?(ST.zones[empPick.zone].slack+(ST.you.seniority==='senior'?-1:1)):0;
-  sock.emit('submitChoice',{action:empPick.action,zone:empPick.zone,helpTarget,cardIdx:selCard,risky:riskyOn&&rg>=2},r=>{if(r&&r.error)return err(r.error);});}
+  const hold=(empPick.action==='slack'&&ST.you.seniority==='junior'&&holdSel)?holdSel:0;
+  sock.emit('submitChoice',{action:empPick.action,zone:empPick.zone,helpTarget,cardIdx:selCard,risky:riskyOn&&rg>=2,hold},r=>{if(r&&r.error)return err(r.error);});}
 function ghostAct(type,targetId){ghostMode=null;sock.emit('submitChoice',{ghostAction:{type,targetId}},r=>{if(r&&r.error)return err(r.error);});}
 function ghostWarnMenu(){ghostMode=ghostMode==='warn'?null:'warn';renderGhost();}
 function toggleCard(i){selCard=(selCard===i)?null:i;renderEmpZones();}
@@ -631,7 +638,13 @@ function renderEmpZones(){
   $('empzones').innerHTML=cells.join('');
   // 賭命衝刺：只有選了 💰+2 以上的摸魚區才點得下去
   const rg=(empPick&&empPick.action==='slack')?(ST.zones[empPick.zone].slack+(you.seniority==='senior'?-1:1)):0;
-  $('riskybox').innerHTML=`<button class="riskbtn ${riskyOn&&rg>=2?'on':''}" ${rg>=2?'':'disabled'} onclick="toggleRisky()">🎲 拼了！成功💰×2、無論成敗💓+2${rg>=2?'':'（限💰+2以上的區）'}</button>`;
+  let extra=`<button class="riskbtn ${riskyOn&&rg>=2?'on':''}" ${rg>=2?'':'disabled'} onclick="toggleRisky()">🎲 拼了！成功💰×2、無論成敗💓+2${rg>=2?'':'（限💰+2以上的區）'}</button>`;
+  // 憋氣（菜鳥限定）：選了摸魚區才可選檔位
+  if(you.seniority==='junior'){
+    const hd=!(empPick&&empPick.action==='slack');
+    extra+=`<div class="seg" style="margin-top:6px"><button ${hd?'disabled':''} class="${holdSel===0?'on':''}" onclick="setHold(0)">不憋氣</button><button ${hd?'disabled':''} class="${holdSel===30?'on':''}" onclick="setHold(30)">🫁 淺憋 30%<br><span style="font-size:.7rem">+1💓</span></button><button ${hd?'disabled':''} class="${holdSel===60?'on':''}" onclick="setHold(60)">🫁 拚命憋 60%<br><span style="font-size:.7rem">+2💓</span></button></div>`;
+  }
+  $('riskybox').innerHTML=extra;
   // 送出鈕文字＝當前選擇摘要（含將出的道具卡）；送出後仍可改選重送（大家都交齊前有效）
   const btn=$('empsubmit');
   const cardNote=(selCard!=null&&you.hand&&you.hand[selCard])?`（出 ${you.hand[selCard].icon}${esc(you.hand[selCard].name)}）`:'';
@@ -646,12 +659,21 @@ function renderEmpZones(){
 function renderBossZones(){
   $('bosszones').innerHTML=ST.slackZones.map(k=>{const z=ST.zones[k];const streak=(ST.zoneStreak&&ST.zoneStreak[k])||0;const locked=streak>=2;const sel=bossPicks.includes(k);
     return `<div class="zone ${sel?'sel':''}" style="${locked?'opacity:.35;pointer-events:none':''}" onclick="pickBoss('${k}')"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">${locked?'🚫連查2回':''}</div></div>`;}).join('');
+  // 緊盯：花經費抵銷菜鳥的憋氣（30%/60%），限巡查區之一
+  if(focusZone&&!bossPicks.includes(focusZone))focusZone=bossPicks[0]||null;
+  const bud=ST.you.budget||0;
+  let fh=`<div style="font-size:.82rem;color:var(--kraft2);margin:6px 0 2px">👀 緊盯（抵銷菜鳥憋氣；💼經費 ${bud}）</div><div class="seg">`
+    +`<button class="${focusPct===0?'on':''}" onclick="setFocusPct(0)">隨便掃</button>`
+    +`<button ${bud<1?'disabled':''} class="${focusPct===30?'on':''}" onclick="setFocusPct(30)">盯一下 30%<br><span style="font-size:.7rem">−1經費</span></button>`
+    +`<button ${bud<2?'disabled':''} class="${focusPct===60?'on':''}" onclick="setFocusPct(60)">死盯 60%<br><span style="font-size:.7rem">−2經費</span></button></div>`;
+  if(focusPct>0&&bossPicks.length>1) fh+='<div class="seg">'+bossPicks.map(k=>`<button class="${focusZone===k?'on':''}" onclick="setFocusZone('${k}')">${ZI[k]}${ST.zones[k].name}</button>`).join('')+'</div>';
+  $('bossfocus').innerHTML=fh;
 }
 function pickBoss(k){const i=bossPicks.indexOf(k);if(i>=0)bossPicks.splice(i,1);else{if(bossPicks.length>=ST.bossInspect)bossPicks.shift();bossPicks.push(k);}renderBossZones();}
 let revAnimKey=null, revTimers=[];
 function rvT(fn,ms){revTimers.push(setTimeout(fn,ms));}
 function renderReveal(){
-  bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null; empPick=null; riskyOn=false;
+  bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null; empPick=null; riskyOn=false; holdSel=0; focusPct=0; focusZone=null;
   const r=ST.reveal;if(!r)return;
   $('revtitle').textContent=`第 ${r.round} 回合揭曉`;
   // 詳細文字（收合備查）
@@ -668,6 +690,7 @@ function renderReveal(){
 function outcomeIcon(x){
   if(x.eliminated)return['💀','red'];
   if(x.caught===true)return['🚨 +'+(x.anx||2)+'心悸','red'];
+  if(x.caught==='held')return['🫁 屏息躲過！','blue'];
   if(x.caught==='excused')return['🗣️ 藉口滑走','blue'];
   if(x.caught==='warned')return['📞 收到報信','blue'];
   if(x.caught==='guarded')return['🦉 學長罩','blue'];
@@ -723,7 +746,7 @@ function playReveal(r,instant){
       el.classList.remove('hold');
       const[txt,color]=outcomeIcon(x);
       if(x.caught===true)el.classList.add('caught');
-      else if(x.gain!=null)el.classList.add('safe2');
+      else if(x.gain!=null||x.caught==='held')el.classList.add('safe2');
       const f=document.createElement('span');f.className='float go '+color;f.textContent=txt;
       el.appendChild(f);
       if(x.eliminated)rvT(()=>{el.classList.add('dead');el.innerHTML='👻 '+esc(x.name);},D(900));
@@ -776,7 +799,7 @@ const RULES_BODY=`
 <h4>👻 出局變幽靈（不是坐板凳）</h4>
 <p>出局後每 2 回合可作祟一次：<b>騷擾老闆</b>（隨機少巡一區）｜<b>打斷協查</b>（主管白跑）｜<b>通風報信</b>（救一位快被抓的同事）。</p>
 <h4>🛒 補給市場＆經濟（老闆行政時開市）</h4>
-<p>隨機翻 3 張卡：員工花 💰 買（藉口3／提神3／雞精3／卡紙2，每回限購 1）——<b>花的就是你的王位分數</b>。老闆用「部門經費」（員工每交差 +1）買 🕘<b>加班令</b>：被點名者本回合不能摸魚，認真做領加班費 +2💰 但過勞 +1💓，或付 3💰 請假開溜。摸魚時可勾 🎲<b>拼了</b>：成功 💰×2、無論成敗 💓+2（限 💰+2 以上的區）。心悸快爆可花 3💰 😮‍💨深呼吸（💓−1，每回 1 次）。</p>
+<p>隨機翻 3 張卡：員工花 💰 買（藉口3／提神3／雞精3／卡紙2，每回限購 1）——<b>花的就是你的王位分數</b>。老闆用「部門經費」（員工每交差 +1）買 🕘<b>加班令</b>：被點名者本回合不能摸魚，認真做領加班費 +2💰 但過勞 +1💓，或付 3💰 請假開溜。摸魚時可勾 🎲<b>拼了</b>：成功 💰×2、無論成敗 💓+2（限 💰+2 以上的區）。心悸快爆可花 3💰 😮‍💨深呼吸（💓−1，每回 1 次）。<b>🫁 憋氣（菜鳥限定）</b>：摸魚時淺憋 +1💓＝30%／拚命憋 +2💓＝60% 機率躲過被抓（不管老闆來不來都扣）；老闆可花經費👀「緊盯」一區抵銷 30%/60%。</p>
 <h4>📏 兩條限制</h4>
 <p>員工不能連兩回合待同一摸魚區；老闆不能連查同一地方三次。</p>
 <h4>🏆 獲勝條件</h4>

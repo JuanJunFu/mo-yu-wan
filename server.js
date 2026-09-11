@@ -59,6 +59,9 @@ const CARD_DEFS = {
 // ---------- 點數經濟（2026-09-11 MVP）：💰=偷懶點數（也是王位分數）、老闆用部門經費 ----------
 const PRICES = { excuse:3, energy:3, jam:2, boost:3, overtime:3 }; // energy/boost≥3：天然匯率約2-3💰/💓，低於此=套利洞
 const OT_REFUSE_COST = 3;     // 付 3💰「請假開溜」拒絕加班
+// 憋氣機制（A′ 限縮版）：只有菜鳥能憋（老鳥走免死金牌線）；💓 計價＝天然凸成本自我節流
+const HOLD_COST  = { 30:1, 60:2 };  // 淺憋+1💓=30%、拚命憋+2💓=60%（無論老闆來不來都扣＝防無腦刷）
+const FOCUS_COST = { 30:1, 60:2 };  // 老闆「緊盯」：−1經費=30%、−2經費=60%，每回合限 1 區
 const SHOP_SEC = 10;          // 單人模式 bot 老闆行政時的補給採購窗口
 const BREATHE_COST = 3;       // 深呼吸：3💰 洗 1💓（限心悸≥門檻-2、每回合 1 次——防無限農場）
 const RISKY_ANX = 2;          // 賭命衝刺：無論成敗 +2💓，摸魚成功分 ×2
@@ -290,6 +293,15 @@ function resolveRound(room){
 
   const inspected=new Set(bossZones); if(supZone) inspected.add(supZone);
 
+  // 老闆緊盯（觀察）：限仍在巡查版圖內的一區；此刻才扣經費（被幽靈/卡紙拔掉的巡查不收錢）
+  let focusZone=null, focusPct=0;
+  const bfoc=room.choices.boss&&room.choices.boss.focus;
+  const bpp=bossOf(room);
+  if(bfoc&&inspected.has(bfoc.zone)&&bpp&&(bpp.budget||0)>=FOCUS_COST[bfoc.pct]){
+    bpp.budget-=FOCUS_COST[bfoc.pct]; focusZone=bfoc.zone; focusPct=bfoc.pct;
+    ghostNotes.push({icon:'👀',text:`老闆瞇起眼睛死盯【${ZONES[focusZone].name}】（觀察 ${focusPct}%）`});
+  }
+
   // 老鳥罩學弟：juniorId -> true（被罩）
   const guarded=new Set();
   for(const e of emps){
@@ -324,9 +336,17 @@ function resolveRound(room){
       safeCount++; r.zoneName='辦公室'; pending[e.id]-=1; r.note='回辦公室休息（安全、不算摸魚、心悸 −1）'; e.lastZone='office';
     } else {
       const zone=ch.zone, z=ZONES[zone]; r.zoneName=z.name; r.zone=zone;
+      // 憋氣（菜鳥限定）：暗選時已承諾，無論老闆來不來都扣 💓
+      const holdPct=(e.seniority==='junior'&&ch.hold)?ch.hold:0;
+      if(holdPct){ pending[e.id]+=HOLD_COST[holdPct]||0; r.hold=holdPct; }
       let caught=inspected.has(zone);
       if(!caught && e.seniority==='junior'){ for(const adj of (ADJ[zone]||[])) if(inspected.has(adj)){caught=true;break;} }
       if(caught){
+        // ⓪ 憋氣骰最先結算（已預付💓；成功＝不消耗下游任何擋箭牌）
+        const dodge=Math.max(0, holdPct-(zone===focusZone?focusPct:0));
+        if(dodge>0&&Math.random()*100<dodge){
+          r.caught='held'; r.note=`🫁 老闆掃過…屏住呼吸驚險躲過！（憋氣 ${holdPct}%${zone===focusZone?`−緊盯 ${focusPct}%`:''}）`;
+        } else {
         const exIdx=e.hand.findIndex(c=>c.type==='excuse');
         if(exIdx>=0){ const c=e.hand.splice(exIdx,1)[0]; r.caught='excused'; r.note=`被抓，但掏出藉口「${c.name}」滑走了！`; }
         else if(warnedSet.has(e.id)){ r.caught='warned'; r.note='被抓前收到幽靈報信，及時溜回座位！'; }
@@ -335,6 +355,7 @@ function resolveRound(room){
         else { const anx=(e.seniority==='junior')?3:2; pending[e.id]+=anx; r.caught=true; r.anx=anx; r.note=`被逮到！這次不算，心悸 +${anx}`;
           // 主管檢舉獎金：若在主管協查區被抓
           if(supZone&&zone===supZone&&sup){ sup.points+=2; r.byBoss=false; log(room,`🕵️ 主管【${sup.name}】協查抓到【${e.name}】(+2 分)`); }
+        }
         }
       } else {
         let gain=z.slack+(e.seniority==='senior'?-1:1); if(gain<0)gain=0;
@@ -491,7 +512,14 @@ function botEmpChoice(room, e){
     const lead=Math.max(...aliveEmps(room).map(x=>x.points));
     if(g>=2&&e.points<lead&&Math.random()<0.25) risky=true;
   }
-  return { ...choice, helpTarget, cardIdx, risky };
+  // 憋氣（菜鳥 bot）：三性格投法——貪懶敢憋、穩健只在很安全時淺憋、搖擺隨機難讀
+  let hold=0;
+  if(choice.action==='slack'&&e.seniority==='junior'){
+    if(style==='greedy'&&e.anxiety<=out-3&&Math.random()<0.4) hold=(e.anxiety<=out-4&&Math.random()<0.3)?60:30;
+    else if(style==='steady'&&e.anxiety<=out-4&&Math.random()<0.25) hold=30;
+    else if(style==='swing'&&Math.random()<0.2) hold=Math.random()<0.5?30:60;
+  }
+  return { ...choice, helpTarget, cardIdx, risky, hold };
 }
 
 // bot 員工的行政階段經濟行為：深呼吸＋逛補給市場
@@ -614,7 +642,16 @@ function scheduleBots(room){
     if(!p.isBot) continue;
     if(p.role==='boss'){
       setTimeout(()=>{ if(!guard()||room.choices.boss!=null) return;
-        room.choices.boss={zones:botBossZones(room)}; tryResolve(room); broadcast(room); }, rand(2000,4500));
+        const zones=botBossZones(room);
+        // 緊盯：記仇老闆對「上回有人得逞的巡查區」瞇眼；陰晴不定偶爾亂盯
+        let focus=null;
+        if((p.budget||0)>=1&&zones.length){
+          if(room.bossPattern==='hunter'&&room.lastReveal){
+            const hot=zones.find(z=>(room.lastReveal.results||[]).some(x=>x.gain!=null&&x.zone===z));
+            if(hot&&Math.random()<0.6) focus={zone:hot,pct:(p.budget>=3&&Math.random()<0.4)?60:30};
+          } else if(room.bossPattern==='chaos'&&Math.random()<0.25) focus={zone:zones[Math.floor(Math.random()*zones.length)],pct:30};
+        }
+        room.choices.boss={zones,focus}; tryResolve(room); broadcast(room); }, rand(2000,4500));
     } else if(p.alive){
       setTimeout(()=>{ if(!guard()||room.choices.emp[p.id]!=null) return;
         // 貪懶 bot 錢夠時偶爾付錢拒絕加班（自由的代價）
@@ -895,7 +932,13 @@ io.on('connection', (socket)=>{
       const picks=(payload.zones||[]).filter(z=>ZONES[z]&&z!=='office');
       if(picks.length!==room.config.bossInspect) return cb&&cb({error:`請選 ${room.config.bossInspect} 個要查的地方`});
       for(const z of picks) if((room.zoneStreak[z]||0)>=2) return cb&&cb({error:`「${ZONES[z].name}」已連查兩回合`});
-      room.choices.boss={zones:picks};
+      // 緊盯（觀察 30/60%）：限巡查區之一、經費夠才收
+      let focus=null; const bf=payload.focus;
+      if(bf&&bf.zone&&picks.includes(bf.zone)&&FOCUS_COST[bf.pct]){
+        if((me.budget||0)<FOCUS_COST[bf.pct]) return cb&&cb({error:`部門經費不足，盯不動（要 ${FOCUS_COST[bf.pct]}）`});
+        focus={zone:bf.zone,pct:bf.pct};
+      }
+      room.choices.boss={zones:picks,focus};
     } else if(me.isSupervisor){
       const zone=payload.inspectZone; if(zone&&(!ZONES[zone]||zone==='office')) return cb&&cb({error:'協查地點無效'});
       room.choices.emp[me.id]={action:'supervise', zone: zone||null};
@@ -916,7 +959,11 @@ io.on('connection', (socket)=>{
         if(me.lastZone===zone) return cb&&cb({error:`上回合已在「${ZONES[zone].name}」，換地方`});
         // 賭命衝刺限 gain≥2 的區（老鳥在低分區拼了=純懲罰，直接擋）
         if(risky){ const g=ZONES[zone].slack+(me.seniority==='senior'?-1:1); if(g<2) return cb&&cb({error:'這區報酬太低，不值得拼命（🎲限💰+2以上的區）'}); }
-        room.choices.emp[me.id]={action:'slack',zone,helpTarget,cardIdx,risky};
+        // 憋氣：菜鳥限定
+        let hold=0;
+        if(payload.hold){ if(me.seniority!=='junior') return cb&&cb({error:'🫁 憋氣是菜鳥的求生術（老鳥有免死金牌）'});
+          hold=(payload.hold===60)?60:30; }
+        room.choices.emp[me.id]={action:'slack',zone,helpTarget,cardIdx,risky,hold};
       } else return cb&&cb({error:'無效動作'});
     }
     cb&&cb({ok:true});
