@@ -184,6 +184,11 @@
           <button data-v="5" onclick="setSeg('solocount',this)">5 人</button>
           <button data-v="6" onclick="setSeg('solocount',this)">6 人</button>
         </div>
+        <label>你的職級</label>
+        <div class="seg" id="solosen">
+          <button data-v="senior" class="on" onclick="setSeg('solosen',this)">🦉 老鳥<br><span style="font-size:.7rem">免死金牌·摸魚−1分</span></button>
+          <button data-v="junior" onclick="setSeg('solosen',this)">🐣 菜鳥<br><span style="font-size:.7rem">能🫁憋氣·摸魚+1分·隔壁區也會被抓</span></button>
+        </div>
         <button class="ghost" onclick="doSolo()">🤖 開始單人練習</button>
       </div>
     </div>
@@ -389,7 +394,7 @@ function renderBossOT(){
   $('otbox').innerHTML=`<div style="font-size:.82rem;color:#a83226;margin:8px 0 2px">🕘 加班令 ×${n}（他本回合不能摸魚；認真做領加班費）</div><ul class="plist">`
     +targets.map(p=>`<li><span>${esc(p.name)}　💰${p.points}</span><button style="width:auto;margin:0;padding:6px 12px;background:var(--red);color:#fff" onclick="sock.emit('orderOvertime',{targetId:'${p.id}'},r=>{if(r&&r.error)err(r.error)})">要求加班</button></li>`).join('')+'</ul>';
 }
-const seg={bossmode:'host',senmode:'balanced',threshold:'mid',solocount:'4'};
+const seg={bossmode:'host',senmode:'balanced',threshold:'mid',solocount:'4',solosen:'senior'};
 function $(id){return document.getElementById(id)}
 function show(id){['s-home','s-lobby','s-game','s-end','s-spec'].forEach(s=>$(s).classList.toggle('hide',s!==id))}
 function err(m){$('err').textContent=m||''; if(m)setTimeout(()=>{if($('err').textContent===m)$('err').textContent=''},4000);}
@@ -405,7 +410,7 @@ function doCreate(){const n=$('name').value.trim();if(!n)return err('請先輸�
   if(pwd&&!/^\d{4}$/.test(pwd))return err('房間密碼須為 4 位數字');
   sock.emit('createRoom',{name:n,roomName:$('roomname').value.trim(),password:pwd},r=>{if(r.error)return err(r.error);saveName(n);myPwd=pwd||null;saveSess(r.code,r.playerId);});}
 function doSolo(){const n=$('name').value.trim();if(!n)return err('請先輸入暱稱');
-  sock.emit('createSolo',{name:n,players:parseInt(seg.solocount)||4},r=>{if(r&&r.error)return err(r.error);saveName(n);myPwd=null;saveSess(r.code,r.playerId);});}
+  sock.emit('createSolo',{name:n,players:parseInt(seg.solocount)||4,seniority:seg.solosen},r=>{if(r&&r.error)return err(r.error);saveName(n);myPwd=null;saveSess(r.code,r.playerId);});}
 function joinWith(code,password){const n=$('name').value.trim();if(!n)return err('請輸入暱稱');
   sock.emit('joinRoom',{name:n,code,password},r=>{
     if(r&&r.needPassword){err(r.error);askPwd(code,'join');return;}

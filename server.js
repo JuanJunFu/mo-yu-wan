@@ -696,10 +696,11 @@ io.on('connection', (socket)=>{
   });
 
   // c-lite 單人練習：真人當員工 ＋ AI 同事 ＋ 腳本老闆（開房即開局；可選 3~6 人局）
-  socket.on('createSolo', ({name,threshold,players}, cb)=>{
+  socket.on('createSolo', ({name,threshold,players,seniority}, cb)=>{
     if(rooms.size>=MAX_ROOMS) return cb&&cb({error:`房間已滿（${MAX_ROOMS}/${MAX_ROOMS}），請稍後再試`});
     name=(name||'玩家').toString().slice(0,12);
     const total=Math.min(6,Math.max(3,parseInt(players)||4)); // 含你＋AI老闆
+    const wantJunior=(seniority==='junior'); // 職級靠加入順序決定（前半=老鳥）：想當菜鳥就排 bot 後面
     const code=newRoomCode();
     const pid=newPid();
     const room={ code, name:'單人練習', password:null, solo:true, createdAt:Date.now(), lastActivity:Date.now(),
@@ -707,9 +708,10 @@ io.on('connection', (socket)=>{
       config:{rounds:8,bossInspect:1,anxietyOut:ANXIETY_OUT_DEFAULT,completeThreshold:0.7},
       choices:{emp:{},boss:null,ghost:{}}, taskDeck:[], cardDeck:[], tasksIssued:0, tasksDone:0, zoneStreak:{}, log:[], winner:null,
       supervisorId:null, promoteCooldown:0, bossFires:BOSS_FIRES, _timer:null, timerEndsAt:null };
-    room.players.set(pid, mkPlayer(pid,socket,name));            // 真人先加＝分職級時穩拿老鳥（有免死金牌，對新手友善）
     const roster=shuffle(BOT_EMP_ROSTER).slice(0,total-2);       // 扣掉真人與 AI 老闆＝AI 同事數
+    if(!wantJunior) room.players.set(pid, mkPlayer(pid,socket,name)); // 先加＝老鳥（免死金牌）
     for(const [style,bn] of roster){ const b=mkBot(bn,style); room.players.set(b.id,b); }
+    if(wantJunior) room.players.set(pid, mkPlayer(pid,socket,name));  // 後加＝菜鳥（能憋氣、摸魚+1分）
     const bossBot=mkBot(BOT_BOSS_NAME,null); room.players.set(bossBot.id,bossBot); room.soloBossId=bossBot.id;
     rooms.set(code,room);
     socket.join(code); socket.data.roomCode=code; socket.data.playerId=pid;
