@@ -159,7 +159,16 @@
         <input id="joincode" maxlength="4" placeholder="房間代碼" style="text-transform:uppercase">
         <button class="ghost" onclick="doJoin()" style="margin-top:0">加入房間</button>
       </div>
-      <button class="ghost" onclick="doSolo()">🤖 單人練習 — 你當員工，AI 同事＋腳本老闆陪你摸魚</button>
+      <div style="margin-top:12px">
+        <label>🤖 單人練習 — 總人數（你＋AI 同事＋AI 老闆）</label>
+        <div class="seg" id="solocount">
+          <button data-v="3" onclick="setSeg('solocount',this)">3 人</button>
+          <button data-v="4" class="on" onclick="setSeg('solocount',this)">4 人</button>
+          <button data-v="5" onclick="setSeg('solocount',this)">5 人</button>
+          <button data-v="6" onclick="setSeg('solocount',this)">6 人</button>
+        </div>
+        <button class="ghost" onclick="doSolo()">🤖 開始單人練習</button>
+      </div>
     </div>
     <div class="card">
       <h2>公開房間 <span id="roomcount" style="color:var(--muted);font-size:.8rem;font-weight:400"></span></h2>
@@ -316,7 +325,7 @@
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null, empPick=null;
-const seg={bossmode:'host',senmode:'balanced',threshold:'mid'};
+const seg={bossmode:'host',senmode:'balanced',threshold:'mid',solocount:'4'};
 function $(id){return document.getElementById(id)}
 function show(id){['s-home','s-lobby','s-game','s-end','s-spec'].forEach(s=>$(s).classList.toggle('hide',s!==id))}
 function err(m){$('err').textContent=m||''; if(m)setTimeout(()=>{if($('err').textContent===m)$('err').textContent=''},4000);}
@@ -332,7 +341,7 @@ function doCreate(){const n=$('name').value.trim();if(!n)return err('請先輸�
   if(pwd&&!/^\d{4}$/.test(pwd))return err('房間密碼須為 4 位數字');
   sock.emit('createRoom',{name:n,roomName:$('roomname').value.trim(),password:pwd},r=>{if(r.error)return err(r.error);saveName(n);myPwd=pwd||null;saveSess(r.code,r.playerId);});}
 function doSolo(){const n=$('name').value.trim();if(!n)return err('請先輸入暱稱');
-  sock.emit('createSolo',{name:n},r=>{if(r&&r.error)return err(r.error);saveName(n);myPwd=null;saveSess(r.code,r.playerId);});}
+  sock.emit('createSolo',{name:n,players:parseInt(seg.solocount)||4},r=>{if(r&&r.error)return err(r.error);saveName(n);myPwd=null;saveSess(r.code,r.playerId);});}
 function joinWith(code,password){const n=$('name').value.trim();if(!n)return err('請輸入暱稱');
   sock.emit('joinRoom',{name:n,code,password},r=>{
     if(r&&r.needPassword){err(r.error);askPwd(code,'join');return;}

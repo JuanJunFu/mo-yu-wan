@@ -77,7 +77,7 @@ const BOSS_PATTERNS = {
   lazy:    { name:'佛系老闆',   hint:'多半只巡 ☕茶水 🖨️影印' },
   chaos:   { name:'陰晴不定老闆', hint:'完全隨機，看心情' },
 };
-const BOT_EMP_ROSTER = [ ['greedy','🤖薪水小偷'], ['steady','🤖乖乖牌'], ['swing','🤖薛丁鵝'] ];
+const BOT_EMP_ROSTER = [ ['greedy','🤖薪水小偷'], ['steady','🤖乖乖牌'], ['swing','🤖薛丁鵝'], ['greedy','🤖摸魚見習生'] ];
 const BOT_BOSS_NAME = '🤖鵝霸老闆';
 
 const rooms = new Map();
@@ -562,10 +562,11 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true,code,playerId:pid}); broadcast(room);
   });
 
-  // c-lite 單人練習：真人當員工 ＋ 2 個 AI 同事 ＋ 腳本老闆（開房即開局）
-  socket.on('createSolo', ({name,threshold}, cb)=>{
+  // c-lite 單人練習：真人當員工 ＋ AI 同事 ＋ 腳本老闆（開房即開局；可選 3~6 人局）
+  socket.on('createSolo', ({name,threshold,players}, cb)=>{
     if(rooms.size>=MAX_ROOMS) return cb&&cb({error:`房間已滿（${MAX_ROOMS}/${MAX_ROOMS}），請稍後再試`});
     name=(name||'玩家').toString().slice(0,12);
+    const total=Math.min(6,Math.max(3,parseInt(players)||4)); // 含你＋AI老闆
     const code=newRoomCode();
     const pid=newPid();
     const room={ code, name:'單人練習', password:null, solo:true, createdAt:Date.now(), lastActivity:Date.now(),
@@ -574,7 +575,7 @@ io.on('connection', (socket)=>{
       choices:{emp:{},boss:null,ghost:{}}, taskDeck:[], cardDeck:[], tasksIssued:0, tasksDone:0, zoneStreak:{}, log:[], winner:null,
       supervisorId:null, promoteCooldown:0, bossFires:BOSS_FIRES, _timer:null, timerEndsAt:null };
     room.players.set(pid, mkPlayer(pid,socket,name));            // 真人先加＝分職級時穩拿老鳥（有免死金牌，對新手友善）
-    const roster=shuffle(BOT_EMP_ROSTER).slice(0,2);
+    const roster=shuffle(BOT_EMP_ROSTER).slice(0,total-2);       // 扣掉真人與 AI 老闆＝AI 同事數
     for(const [style,bn] of roster){ const b=mkBot(bn,style); room.players.set(b.id,b); }
     const bossBot=mkBot(BOT_BOSS_NAME,null); room.players.set(bossBot.id,bossBot); room.soloBossId=bossBot.id;
     rooms.set(code,room);
