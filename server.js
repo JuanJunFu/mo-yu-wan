@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const path = require('path');
 const QRCode = require('qrcode');
@@ -36,6 +37,7 @@ const HAND_LIMIT = 3;         // 手牌上限
 const MAX_ROOMS = 10;               // 房間總數上限（防濫用閥；單機記憶體實際撐得更多）
 const LOBBY_IDLE_MS = 30*60*1000;   // 等待中房間閒置 30 分回收
 const ENDED_IDLE_MS = 5*60*1000;    // 遊戲結束後 5 分回收
+const ABANDON_MS = 5*60*1000;       // 遊戲中全員真人離線 5 分回收（保留重連窗口）
 
 const TASKS = [
   '幫全辦公室買飲料（記 12 種客製）','印 500 頁報告（釘歪重印）','回一封「收到」CC 全公司',
@@ -67,6 +69,16 @@ function drawCard(room, p){
 }
 const GHOST_ACTIONS = { haunt:'👻 騷擾老闆', warn:'📞 通風報信', disrupt:'🌀 打斷協查' };
 
+// ---------- c-lite 單人模式：老闆行為模式卡（開局翻給員工看＝「讀 AI」的樂趣） ----------
+const BOSS_PATTERNS = {
+  routine: { name:'輪班表老闆', hint:'照固定路線輪流巡（茶水→影印→廁所→頂樓），被連查兩回的地方會跳過' },
+  hunter:  { name:'記仇老闆',   hint:'特別愛查「上回合有人摸魚得逞」的地方' },
+  lazy:    { name:'佛系老闆',   hint:'懶得走遠，大多只巡茶水間和影印間，偶爾才殺上頂樓' },
+  chaos:   { name:'陰晴不定老闆', hint:'完全沒有規律，全憑當天心情亂巡' },
+};
+const BOT_EMP_ROSTER = [ ['greedy','🤖薪水小偷'], ['steady','🤖乖乖牌'], ['swing','🤖薛丁鵝'] ];
+const BOT_BOSS_NAME = '🤖鵝霸老闆';
+
 const rooms = new Map();
 
 // ---------- 工具 ----------
@@ -76,15 +88,18 @@ function shuffle(a){ const b=[...a]; for(let i=b.length-1;i>0;i--){const j=Math.
 function log(room,msg){ room.log.push(msg); if(room.log.length>60)room.log.shift(); }
 function touch(room){ room.lastActivity=Date.now(); }
 function lobbySnapshot(){
-  return [...rooms.values()].sort((a,b)=>b.createdAt-a.createdAt).map(r=>({
+  return [...rooms.values()].filter(r=>!r.solo).sort((a,b)=>b.createdAt-a.createdAt).map(r=>({
     code:r.code, name:r.name, players:r.players.size, max:6,
     locked:!!r.password, inGame:r.phase!=='lobby',
   }));
 }
-function mkPlayer(socket,name){ return { id:socket.id, socket, name, connected:true, role:null, seniority:null,
+// 玩家身分 = 獨立 playerId（uuid），socket 只是可替換的傳輸管道（斷線重連 rebind、bot 可為 null）
+function newPid(){ return crypto.randomUUID().replace(/-/g,'').slice(0,16); }
+function mkPlayer(pid,socket,name){ return { id:pid, socket, name, connected:true, isBot:false, role:null, seniority:null,
   alive:true, isGhost:false, slackCount:0, points:0, anxiety:0, immunity:0, lastZone:null, task:null,
   isSupervisor:false, supTermLeft:0, helpCooldown:0, canBeFired:false, voiceOn:false,
   hand:[], ghostCooldown:0 }; }
+function humanConnected(room){ return [...room.players.values()].some(p=>!p.isBot&&p.connected); }
 function bossOf(room){ for(const p of room.players.values()) if(p.role==='boss') return p; return null; }
 function aliveEmps(room){ return [...room.players.values()].filter(p=>p.role==='emp'&&p.alive); }
 
@@ -98,7 +113,7 @@ function viewFor(room, pid){
   const boss = bossOf(room);
   const players = [...room.players.values()].map(p=>({
     id:p.id, name:p.name, role:p.role, seniority:p.seniority, alive:p.alive, isGhost:p.isGhost,
-    slackCount:p.slackCount, anxiety:p.anxiety, points:p.points, connected:p.connected,
+    slackCount:p.slackCount, anxiety:p.anxiety, points:p.points, connected:p.connected, isBot:!!p.isBot,
     hasTask:!!p.task, isSupervisor:p.isSupervisor, canBeFired:p.canBeFired, isHost:p.id===room.hostId,
     submitted: room.phase==='choosing' ? (p.role==='boss' ? room.choices.boss!=null : (room.choices.emp[p.id]!=null)) : false,
   }));
@@ -106,7 +121,8 @@ function viewFor(room, pid){
     code:room.code, name:room.name||null, phase:room.phase, round:room.round, rounds:room.config.rounds,
     bossInspect:room.config.bossInspect, anxietyOut:room.config.anxietyOut, completeThreshold:room.config.completeThreshold,
     tasksIssued:room.tasksIssued, tasksDone:room.tasksDone, timerEndsAt:room.timerEndsAt||null, revealSkipAt:room.revealSkipAt||null,
-    zones:ZONES, slackZones:SLACK_ZONES,
+    zones:ZONES, slackZones:SLACK_ZONES, solo:!!room.solo,
+    bossPattern: room.bossPattern ? { key:room.bossPattern, name:BOSS_PATTERNS[room.bossPattern].name, hint:BOSS_PATTERNS[room.bossPattern].hint } : null,
     supervisorName: room.supervisorId ? (room.players.get(room.supervisorId)||{}).name : null,
     you: me ? {
       id:me.id, name:me.name, role:me.role, seniority:me.seniority, alive:me.alive, isGhost:me.isGhost,
@@ -150,6 +166,7 @@ function startGame(room, opts){
   let bossId=room.hostId;
   if(opts.bossMode==='random') bossId=ids[Math.floor(Math.random()*ids.length)];
   else if(opts.bossId&&room.players.has(opts.bossId)) bossId=opts.bossId;
+  if(room.solo&&room.soloBossId&&room.players.has(room.soloBossId)) bossId=room.soloBossId; // 單人模式：老闆固定是腳本 bot
   const empIds=ids.filter(i=>i!==bossId);
   const seniorCount=Math.max(1,Math.floor(empIds.length/2));
   const seniorSet = opts.seniorityMode==='random' ? new Set(shuffle(empIds).slice(0,seniorCount)) : new Set(empIds.slice(0,seniorCount));
@@ -171,14 +188,29 @@ function startGame(room, opts){
   room.round=1; room.zoneStreak={}; room.winner=null; room.log=[];
   room.supervisorId=null; room.promoteCooldown=0; room.bossFires=BOSS_FIRES;
   log(room, `遊戲開始！老闆是【${room.players.get(bossId).name}】，${room.config.rounds} 回合，老闆查 ${room.config.bossInspect} 區，業績門檻 ${Math.round(room.config.completeThreshold*100)}%。`);
+  // bot 老闆開局翻「行為模式卡」給員工看（讀 AI 的樂趣）
+  room.bossPattern = room.players.get(bossId).isBot ? shuffle(Object.keys(BOSS_PATTERNS))[0] : null;
+  if(room.bossPattern) log(room, `📇 老闆行為模式卡：【${BOSS_PATTERNS[room.bossPattern].name}】— ${BOSS_PATTERNS[room.bossPattern].hint}`);
   enterAdmin(room);
   return { ok:true };
 }
 
 function enterAdmin(room){
   room.phase='admin'; room.choices={emp:{},boss:null,ghost:{}};
+  const b=bossOf(room);
+  // 真人老闆沒有任何行政事項可辦 → 直接開工，省掉全員枯等
+  if(b&&!b.isBot){
+    const needTask=room.taskDeck.length>0&&aliveEmps(room).some(p=>!p.task&&!p.isSupervisor);
+    const canFire=room.bossFires>0&&aliveEmps(room).some(p=>p.canBeFired);
+    const canPromote=room.promoteCooldown===0&&!room.supervisorId&&aliveEmps(room).some(p=>!p.isSupervisor);
+    if(!needTask&&!canFire&&!canPromote){
+      log(room, `— 第 ${room.round} 回合：老闆沒有行政事項，直接開工 —`);
+      enterChoose(room); return;
+    }
+  }
   log(room, `— 第 ${room.round} 回合：老闆行政（派工作／升職／資遣）—`);
   startTimer(room, ADMIN_SEC, ()=>{ enterChoose(room); broadcast(room); });
+  if(b&&b.isBot) scheduleBotAdmin(room);
 }
 function enterChoose(room){
   room.phase='choosing'; room.choices={emp:{},boss:null,ghost:{}};
@@ -187,6 +219,7 @@ function enterChoose(room){
     if(room.choices.boss==null) room.choices.boss={zones:[]};
     resolveRound(room); broadcast(room);
   });
+  scheduleBots(room);
 }
 
 // ---------- 結算 ----------
@@ -364,6 +397,148 @@ function endGame(room, side, reason, winnerEmpId){
 
 function advanceRound(room){ room.round++; enterAdmin(room); }
 
+// ========== c-lite 單人模式：bot 層（只產生「選擇」，結算引擎 resolveRound 完全不動） ==========
+function mkBot(name, style){ const p=mkPlayer(newPid(), null, name); p.isBot=true; p.botStyle=style; return p; }
+function rand(a,b){ return a+Math.random()*(b-a); }
+
+// softmax 機率抽樣（非 argmax）：讓 bot 有「人味」變異
+function softmaxPick(cands, temp){
+  const m=Math.max(...cands.map(c=>c.score));
+  const ws=cands.map(c=>Math.exp((c.score-m)/temp));
+  let r=Math.random()*ws.reduce((a,b)=>a+b,0);
+  for(let i=0;i<cands.length;i++){ r-=ws[i]; if(r<=0) return cands[i].choice; }
+  return cands[cands.length-1].choice;
+}
+
+// 員工 bot：三性格（貪懶/穩健/搖擺）＋任務壓力＋心悸自保；不偷看老闆巡查（不作弊）
+function botEmpChoice(room, e){
+  if(e.isSupervisor){
+    const zs=SLACK_ZONES.slice();
+    return { action:'supervise', zone: Math.random()<0.7 ? zs[Math.floor(Math.random()*zs.length)] : null };
+  }
+  const out=room.config.anxietyOut, style=e.botStyle||'steady';
+  const hot=e.anxiety>=out-2, warm=e.anxiety>=out-3;
+  const cands=[];
+  cands.push({ score: 2+(hot?6:0)+(e.anxiety>0?1:0)+(style==='steady'?1:0)-(style==='greedy'?1:0),
+    choice:{action:'idle',zone:'office'} });
+  let sWork=1+(hot?4:0)+(style==='steady'?1:0);
+  if(e.task){ const t=e.task; sWork += t.state==='grace'?10 : (t.deadlineLeft<=1?7 : (t.need-t.progress>=3?3:1)); }
+  cands.push({ score:sWork, choice:{action:'work',zone:'office'} });
+  for(const k of SLACK_ZONES){
+    if(e.lastZone===k) continue;
+    const z=ZONES[k];
+    cands.push({ score: z.slack*2+(style==='greedy'?z.slack:0)-z.anxiety*(hot?4:(warm?2:1))+(e.task?1:0),
+      choice:{action:'slack',zone:k} });
+  }
+  const temp={greedy:1.1,steady:1.4,swing:2.6}[style]||1.5;
+  const choice=softmaxPick(cands,temp);
+  // 道具：心悸快爆先喝提神；衝高爽區帶雞精；偶爾搞卡紙
+  let cardIdx=null;
+  const idxOf=t=>e.hand.findIndex(c=>c.type===t);
+  if(hot&&idxOf('energy')>=0) cardIdx=idxOf('energy');
+  else if(choice.action==='slack'&&ZONES[choice.zone].slack>=3&&idxOf('boost')>=0&&Math.random()<0.6) cardIdx=idxOf('boost');
+  else if(idxOf('jam')>=0&&Math.random()<0.2) cardIdx=idxOf('jam');
+  // 老鳥 bot 會罩心悸快爆的學弟（含真人玩家）
+  let helpTarget=null;
+  if(e.seniority==='senior'&&!e.isSupervisor&&e.helpCooldown===0){
+    const j=aliveEmps(room).find(x=>x.seniority==='junior'&&!x.isSupervisor&&x.anxiety>=out-2);
+    if(j&&Math.random()<0.5) helpTarget=j.id;
+  }
+  return { ...choice, helpTarget, cardIdx };
+}
+
+// 老闆 bot 巡查：照「行為模式卡」出牌（員工看得到卡＝可讀可破，讀 AI 的樂趣）
+function botBossZones(room){
+  const n=room.config.bossInspect;
+  const avail=SLACK_ZONES.filter(z=>(room.zoneStreak[z]||0)<2);
+  const pat=room.bossPattern||'chaos';
+  if(pat==='routine'){
+    const order=['tea','copy','toilet','roof'], start=(room.round-1)%4, picks=[];
+    for(let i=0;i<8&&picks.length<n;i++){ const z=order[(start+i)%4]; if(avail.includes(z)&&!picks.includes(z)) picks.push(z); }
+    return picks;
+  }
+  const w={}; for(const z of avail) w[z]=1;
+  if(pat==='hunter'&&room.lastReveal) for(const r of (room.lastReveal.results||[])) if(r.gain!=null&&w[r.zone]!=null) w[r.zone]+=3;
+  if(pat==='lazy'){ if(w.tea!=null)w.tea+=2; if(w.copy!=null)w.copy+=2; }
+  const picks=[], pool=avail.slice();
+  while(picks.length<n&&pool.length){
+    let tot=pool.reduce((a,z)=>a+w[z],0), r=Math.random()*tot, sel=pool[0];
+    for(const z of pool){ r-=w[z]; if(r<=0){sel=z;break;} }
+    picks.push(sel); pool.splice(pool.indexOf(sel),1);
+  }
+  return picks;
+}
+
+function botGhostAction(room, g){
+  const targets=aliveEmps(room);
+  const opts=['haunt']; if(room.supervisorId) opts.push('disrupt'); if(targets.length) opts.push('warn');
+  const t=opts[Math.floor(Math.random()*opts.length)];
+  if(t==='warn'){ const human=targets.find(x=>!x.isBot); const tgt=human||[...targets].sort((a,b)=>b.anxiety-a.anxiety)[0]; return {type:'warn',targetId:tgt.id}; }
+  return {type:t,targetId:null};
+}
+
+// 老闆 bot 行政：派任務給所有閒置員工；升職陷阱＝升當前摸魚王（橡皮筋）；有逾期者 80% 開鍘
+function botAdmin(room){
+  const b=bossOf(room); if(!b||!b.isBot) return;
+  for(const p of aliveEmps(room)){
+    if(!p.task&&!p.isSupervisor&&room.taskDeck.length){
+      const name=room.taskDeck.shift();
+      p.task={name,need:TASK_NEED,deadlineLeft:TASK_DEADLINE,progress:0,state:'active'}; room.tasksIssued++;
+      log(room,`📋 老闆派給【${p.name}】：${name}`);
+    }
+  }
+  if(room.promoteCooldown===0&&!room.supervisorId){
+    const lead=[...aliveEmps(room)].filter(p=>!p.isSupervisor).sort((a,b)=>b.slackCount-a.slackCount||b.points-a.points)[0];
+    if(lead&&lead.slackCount>=2&&Math.random()<0.7){
+      lead.isSupervisor=true; lead.supTermLeft=SUPERVISOR_TERM; room.supervisorId=lead.id; room.promoteCooldown=PROMOTE_COOLDOWN;
+      log(room,`🧑‍💼 老闆升【${lead.name}】為代理主管（任期 ${SUPERVISOR_TERM} 回，不能摸魚、可協查抓人）`);
+    }
+  }
+  if(room.bossFires>0){
+    const f=aliveEmps(room).find(p=>p.canBeFired);
+    if(f&&Math.random()<0.8){
+      if(f.seniority==='senior'&&f.immunity>0){ f.immunity--; f.canBeFired=false; room.bossFires--; log(room,`🛡️【${f.name}】用免死金牌擋下資遣！`); }
+      else { f.alive=false; f.isGhost=true; if(f.isSupervisor){f.isSupervisor=false; if(room.supervisorId===f.id)room.supervisorId=null;}
+        room.bossFires--; log(room,`🔨 老闆資遣了【${f.name}】！（剩 ${room.bossFires} 次）`); }
+    }
+  }
+}
+
+function scheduleBotAdmin(room){
+  const round=room.round;
+  setTimeout(()=>{
+    if(!rooms.has(room.code)||room.phase!=='admin'||room.round!==round) return;
+    botAdmin(room); checkWin(room);
+    if(room.phase==='admin') enterChoose(room);
+    broadcast(room);
+  }, rand(1500,3000));
+}
+
+// choosing 進場時為每個 bot 排「思考延遲」後代打；寫入與真人共用 room.choices，湊齊同樣走 tryResolve
+function scheduleBots(room){
+  const round=room.round;
+  const guard=()=>rooms.has(room.code)&&room.phase==='choosing'&&room.round===round;
+  for(const p of room.players.values()){
+    if(!p.isBot) continue;
+    if(p.role==='boss'){
+      setTimeout(()=>{ if(!guard()||room.choices.boss!=null) return;
+        room.choices.boss={zones:botBossZones(room)}; tryResolve(room); broadcast(room); }, rand(2000,4500));
+    } else if(p.alive){
+      setTimeout(()=>{ if(!guard()||room.choices.emp[p.id]!=null) return;
+        room.choices.emp[p.id]=botEmpChoice(room,p); tryResolve(room); broadcast(room); }, rand(1200,4000));
+    } else if(p.isGhost&&p.ghostCooldown===0){
+      setTimeout(()=>{ if(!guard()||room.choices.ghost[p.id]) return;
+        if(Math.random()<0.6){ room.choices.ghost[p.id]=botGhostAction(room,p); broadcast(room); } }, rand(1500,3500));
+    }
+  }
+}
+
+function tryResolve(room){
+  if(room.phase!=='choosing') return;
+  const done=aliveEmps(room).every(e=>room.choices.emp[e.id]!=null)&&room.choices.boss!=null;
+  if(done) resolveRound(room);
+}
+
 // ---------- Socket ----------
 io.on('connection', (socket)=>{
   socket.data.roomCode=null;
@@ -375,14 +550,38 @@ io.on('connection', (socket)=>{
     password=(password||'').toString().trim();
     if(password&&!/^\d{4}$/.test(password)) return cb&&cb({error:'房間密碼須為 4 位數字'});
     const code=newRoomCode();
+    const pid=newPid();
     const room={ code, name:roomName, password:password||null, createdAt:Date.now(), lastActivity:Date.now(),
-      spectators:new Map(), hostId:socket.id, players:new Map(), phase:'lobby', round:0,
+      spectators:new Map(), hostId:pid, players:new Map(), phase:'lobby', round:0,
       config:{rounds:8,bossInspect:1,anxietyOut:ANXIETY_OUT_DEFAULT,completeThreshold:0.7},
       choices:{emp:{},boss:null,ghost:{}}, taskDeck:[], cardDeck:[], tasksIssued:0, tasksDone:0, zoneStreak:{}, log:[], winner:null,
       supervisorId:null, promoteCooldown:0, bossFires:BOSS_FIRES, _timer:null, timerEndsAt:null };
-    room.players.set(socket.id, mkPlayer(socket,name)); rooms.set(code,room);
-    socket.join(code); socket.data.roomCode=code; log(room,`【${name}】開了房間 ${code}`);
-    cb&&cb({ok:true,code,playerId:socket.id}); broadcast(room);
+    room.players.set(pid, mkPlayer(pid,socket,name)); rooms.set(code,room);
+    socket.join(code); socket.data.roomCode=code; socket.data.playerId=pid; log(room,`【${name}】開了房間 ${code}`);
+    cb&&cb({ok:true,code,playerId:pid}); broadcast(room);
+  });
+
+  // c-lite 單人練習：真人當員工 ＋ 2 個 AI 同事 ＋ 腳本老闆（開房即開局）
+  socket.on('createSolo', ({name,threshold}, cb)=>{
+    if(rooms.size>=MAX_ROOMS) return cb&&cb({error:`房間已滿（${MAX_ROOMS}/${MAX_ROOMS}），請稍後再試`});
+    name=(name||'玩家').toString().slice(0,12);
+    const code=newRoomCode();
+    const pid=newPid();
+    const room={ code, name:'單人練習', password:null, solo:true, createdAt:Date.now(), lastActivity:Date.now(),
+      spectators:new Map(), hostId:pid, players:new Map(), phase:'lobby', round:0,
+      config:{rounds:8,bossInspect:1,anxietyOut:ANXIETY_OUT_DEFAULT,completeThreshold:0.7},
+      choices:{emp:{},boss:null,ghost:{}}, taskDeck:[], cardDeck:[], tasksIssued:0, tasksDone:0, zoneStreak:{}, log:[], winner:null,
+      supervisorId:null, promoteCooldown:0, bossFires:BOSS_FIRES, _timer:null, timerEndsAt:null };
+    room.players.set(pid, mkPlayer(pid,socket,name));            // 真人先加＝分職級時穩拿老鳥（有免死金牌，對新手友善）
+    const roster=shuffle(BOT_EMP_ROSTER).slice(0,2);
+    for(const [style,bn] of roster){ const b=mkBot(bn,style); room.players.set(b.id,b); }
+    const bossBot=mkBot(BOT_BOSS_NAME,null); room.players.set(bossBot.id,bossBot); room.soloBossId=bossBot.id;
+    rooms.set(code,room);
+    socket.join(code); socket.data.roomCode=code; socket.data.playerId=pid;
+    log(room,`【${name}】開了單人練習房（vs ${roster.map(r=>r[1]).join('、')}＋${BOT_BOSS_NAME}）`);
+    const res=startGame(room,{threshold:threshold||'mid', seniorityMode:'balanced'});
+    if(res.error){ rooms.delete(code); return cb&&cb(res); }
+    cb&&cb({ok:true,code,playerId:pid}); broadcast(room);
   });
 
   socket.on('joinRoom', ({code,name,password}, cb)=>{
@@ -396,8 +595,23 @@ io.on('connection', (socket)=>{
       if(pwd!==room.password) return cb&&cb({error:pwd?'密碼錯誤':'此房間已上鎖', needPassword:true});
     }
     touch(room);
-    room.players.set(socket.id, mkPlayer(socket,name)); socket.join(code); socket.data.roomCode=code;
-    log(room,`【${name}】加入房間`); cb&&cb({ok:true,code,playerId:socket.id}); broadcast(room);
+    const pid=newPid();
+    room.players.set(pid, mkPlayer(pid,socket,name)); socket.join(code); socket.data.roomCode=code; socket.data.playerId=pid;
+    log(room,`【${name}】加入房間`); cb&&cb({ok:true,code,playerId:pid}); broadcast(room);
+  });
+
+  // 斷線重連：憑 playerId 綁回原座位（任何階段皆可，含遊戲中）
+  socket.on('rejoin', ({code,playerId}, cb)=>{
+    code=(code||'').toString().toUpperCase().trim();
+    const room=rooms.get(code);
+    if(!room) return cb&&cb({error:'房間已不存在'});
+    const me=room.players.get((playerId||'').toString());
+    if(!me||me.isBot) return cb&&cb({error:'找不到你的座位'});
+    if(me.connected&&me.socket&&me.socket.id!==socket.id){ try{me.socket.disconnect(true);}catch(e){} } // 舊分頁擠下線
+    me.socket=socket; me.connected=true; touch(room);
+    socket.join(code); socket.data.roomCode=code; socket.data.playerId=me.id;
+    log(room,`【${me.name}】重新連線`);
+    cb&&cb({ok:true,code,playerId:me.id}); broadcast(room);
   });
 
   socket.on('listRooms', (cb)=>{ cb&&cb({ok:true, rooms:lobbySnapshot(), count:rooms.size, max:MAX_ROOMS}); });
@@ -420,7 +634,7 @@ io.on('connection', (socket)=>{
   // 房主變更/解除房間密碼（已在房內者不受影響；舊邀請連結的 key 會失效）
   socket.on('setPassword', ({password}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return cb&&cb({error:'你不在任何房間'});
-    if(socket.id!==room.hostId) return cb&&cb({error:'只有房主能改密碼'});
+    if(socket.data.playerId!==room.hostId) return cb&&cb({error:'只有房主能改密碼'});
     password=(password||'').toString().trim();
     if(password&&!/^\d{4}$/.test(password)) return cb&&cb({error:'密碼須為 4 位數字'});
     room.password=password||null; touch(room);
@@ -431,7 +645,7 @@ io.on('connection', (socket)=>{
   // 房主主動關閉房間，釋出名額
   socket.on('closeRoom', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return cb&&cb({error:'你不在任何房間'});
-    if(socket.id!==room.hostId) return cb&&cb({error:'只有房主能關閉房間'});
+    if(socket.data.playerId!==room.hostId) return cb&&cb({error:'只有房主能關閉房間'});
     clearTimer(room);
     for(const p of room.players.values()){
       if(p.connected&&p.socket){ p.socket.emit('kicked',{reason:'房主關閉了房間'}); p.socket.leave(room.code); p.socket.data.roomCode=null; }
@@ -451,7 +665,7 @@ io.on('connection', (socket)=>{
 
   socket.on('startGame', (opts, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return;
-    if(socket.id!==room.hostId) return cb&&cb({error:'只有房主能開始'});
+    if(socket.data.playerId!==room.hostId) return cb&&cb({error:'只有房主能開始'});
     touch(room);
     const res=startGame(room,opts||{}); if(res.error) return cb&&cb(res);
     cb&&cb({ok:true}); broadcast(room);
@@ -459,7 +673,7 @@ io.on('connection', (socket)=>{
 
   socket.on('assignTask', ({targetId}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
-    const b=bossOf(room); if(!b||socket.id!==b.id) return cb&&cb({error:'只有老闆能派任務'});
+    const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能派任務'});
     const t=room.players.get(targetId);
     if(!t||t.role!=='emp'||!t.alive||t.task||t.isSupervisor) return cb&&cb({error:'該員工不可指派'});
     if(room.taskDeck.length===0) return cb&&cb({error:'任務卡用完了'});
@@ -470,7 +684,7 @@ io.on('connection', (socket)=>{
 
   socket.on('promote', ({targetId}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
-    const b=bossOf(room); if(!b||socket.id!==b.id) return cb&&cb({error:'只有老闆能升職'});
+    const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能升職'});
     if(room.promoteCooldown>0) return cb&&cb({error:`升職令冷卻中（還 ${room.promoteCooldown} 回）`});
     const t=room.players.get(targetId);
     if(!t||t.role!=='emp'||!t.alive||t.isSupervisor) return cb&&cb({error:'不可升職此人'});
@@ -482,7 +696,7 @@ io.on('connection', (socket)=>{
 
   socket.on('fire', ({targetId}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
-    const b=bossOf(room); if(!b||socket.id!==b.id) return cb&&cb({error:'只有老闆能資遣'});
+    const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能資遣'});
     if(room.bossFires<=0) return cb&&cb({error:'資遣次數用完了'});
     const t=room.players.get(targetId);
     if(!t||t.role!=='emp'||!t.alive||!t.canBeFired) return cb&&cb({error:'此人不可資遣（需有逾期紀錄）'});
@@ -495,13 +709,13 @@ io.on('connection', (socket)=>{
 
   socket.on('beginRound', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
-    const b=bossOf(room); if(!b||socket.id!==b.id) return cb&&cb({error:'只有老闆能開始本回合'});
+    const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能開始本回合'});
     enterChoose(room); broadcast(room);
   });
 
   socket.on('submitChoice', (payload, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='choosing') return;
-    const me=room.players.get(socket.id); if(!me) return;
+    const me=room.players.get(socket.data.playerId); if(!me) return;
     if(!me.alive){
       // 幽靈行動（不擋結算節奏；沒出就跳過）
       if(!me.isGhost) return;
@@ -523,7 +737,7 @@ io.on('connection', (socket)=>{
       room.choices.boss={zones:picks};
     } else if(me.isSupervisor){
       const zone=payload.inspectZone; if(zone&&(!ZONES[zone]||zone==='office')) return cb&&cb({error:'協查地點無效'});
-      room.choices.emp[socket.id]={action:'supervise', zone: zone||null};
+      room.choices.emp[me.id]={action:'supervise', zone: zone||null};
     } else {
       const action=payload.action; const helpTarget=payload.helpTarget||null;
       let cardIdx=null;
@@ -533,25 +747,24 @@ io.on('connection', (socket)=>{
         if(CARD_DEFS[c.type].kind!=='item') return cb&&cb({error:'藉口卡不用出，被抓時會自動使用'});
         cardIdx=payload.cardIdx;
       }
-      if(action==='work'||action==='idle') room.choices.emp[socket.id]={action,zone:'office',helpTarget,cardIdx};
+      if(action==='work'||action==='idle') room.choices.emp[me.id]={action,zone:'office',helpTarget,cardIdx};
       else if(action==='slack'){ const zone=payload.zone;
         if(!ZONES[zone]||zone==='office') return cb&&cb({error:'請選一個摸魚區'});
         if(me.lastZone===zone) return cb&&cb({error:`上回合已在「${ZONES[zone].name}」，換地方`});
-        room.choices.emp[socket.id]={action:'slack',zone,helpTarget,cardIdx};
+        room.choices.emp[me.id]={action:'slack',zone,helpTarget,cardIdx};
       } else return cb&&cb({error:'無效動作'});
     }
     cb&&cb({ok:true});
-    const done=aliveEmps(room).every(e=>room.choices.emp[e.id]!=null)&&room.choices.boss!=null;
-    if(done) resolveRound(room);
+    tryResolve(room);
     broadcast(room);
   });
 
-  socket.on('nextRound', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room||socket.id!==room.hostId||room.phase!=='reveal') return;
+  socket.on('nextRound', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room||socket.data.playerId!==room.hostId||room.phase!=='reveal') return;
     if(room.revealSkipAt && Date.now()<room.revealSkipAt) return; // 前 5 秒不能跳
     advanceRound(room); broadcast(room); });
 
   socket.on('restart', ()=>{
-    const room=rooms.get(socket.data.roomCode); if(!room||socket.id!==room.hostId) return;
+    const room=rooms.get(socket.data.roomCode); if(!room||socket.data.playerId!==room.hostId) return;
     clearTimer(room); touch(room);
     for(const [id,p] of room.players) if(!p.connected) room.players.delete(id); // 再玩一局時剔除離線者
     room.phase='lobby'; room.round=0; room.winner=null; room.choices={emp:{},boss:null,ghost:{}};
@@ -563,27 +776,31 @@ io.on('connection', (socket)=>{
   // ---- 語音（WebRTC 信令；實際音訊走 P2P） ----
   socket.on('voice-join', ()=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return;
-    const me=room.players.get(socket.id); if(!me) return; me.voiceOn=true;
-    const peers=[...room.players.values()].filter(p=>p.voiceOn&&p.connected&&p.id!==socket.id).map(p=>({id:p.id,name:p.name}));
+    const me=room.players.get(socket.data.playerId); if(!me) return; me.voiceOn=true;
+    // 語音信令走 socket.id 路由（io.to 需要 socket room），與遊戲身分 playerId 分離
+    const peers=[...room.players.values()].filter(p=>p.voiceOn&&p.connected&&p.socket&&p.socket.id!==socket.id).map(p=>({id:p.socket.id,name:p.name}));
     socket.emit('voice-peers', peers);                              // 我方主動 offer 這些既有語音者
     socket.to(room.code).emit('voice-joined', {id:socket.id, name:me.name});
   });
-  socket.on('voice-leave', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room) return; const me=room.players.get(socket.id); if(me) me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); });
+  socket.on('voice-leave', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room) return; const me=room.players.get(socket.data.playerId); if(me) me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); });
   socket.on('voice-signal', ({to,data})=>{ io.to(to).emit('voice-signal',{from:socket.id, data}); });
 
   socket.on('disconnect', ()=>{
     const sr=rooms.get(socket.data.specCode); if(sr&&sr.spectators) sr.spectators.delete(socket.id);
     const room=rooms.get(socket.data.roomCode); if(!room) return;
-    const me=room.players.get(socket.id);
+    const me=room.players.get(socket.data.playerId);
+    if(me&&me.socket&&me.socket.id!==socket.id) return; // 已被新連線 rebind（rejoin 擠下線），舊 socket 的 disconnect 不動座位
     if(me){
       if(me.voiceOn){ me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); }
-      me.connected=false;
-      // 等待室/結算畫面離線＝直接讓出名額；遊戲中保留座位（角色還在局裡）
-      if(room.phase==='lobby'||room.phase==='ended'){ room.players.delete(socket.id); touch(room); log(room,`【${me.name}】離開房間（名額已釋出）`); }
-      else log(room,`【${me.name}】離線`);
+      me.connected=false; me.socket=null;
+      // 等待室/結算畫面離線＝直接讓出名額；遊戲中保留座位（角色還在局裡，可憑 playerId 重連）
+      if(room.phase==='lobby'||room.phase==='ended'){ room.players.delete(me.id); touch(room); log(room,`【${me.name}】離開房間（名額已釋出）`); }
+      else { touch(room); log(room,`【${me.name}】離線（可重新整理頁面重連）`); }
     }
-    if(socket.id===room.hostId){ const others=[...room.players.values()].filter(p=>p.connected); if(others.length){ room.hostId=others[0].id; log(room,`房主離線，改由【${others[0].name}】接手`); } }
-    if(room.players.size===0||[...room.players.values()].every(p=>!p.connected)){ clearTimer(room); rooms.delete(room.code); return; }
+    if(me&&me.id===room.hostId){ const others=[...room.players.values()].filter(p=>p.connected&&!p.isBot); if(others.length){ room.hostId=others[0].id; log(room,`房主離線，改由【${others[0].name}】接手`); } }
+    if(room.players.size===0){ clearTimer(room); rooms.delete(room.code); return; }
+    // 遊戲中全員（真人）離線不立即刪房——保留給重連，交給閒置回收器（ABANDON_MS）
+    if((room.phase==='lobby'||room.phase==='ended')&&!humanConnected(room)){ clearTimer(room); rooms.delete(room.code); return; }
     broadcast(room);
   });
 });
@@ -593,7 +810,9 @@ setInterval(()=>{
   const now=Date.now();
   for(const room of rooms.values()){
     const idle=now-(room.lastActivity||room.createdAt||now);
-    const expired=(room.phase==='lobby'&&idle>LOBBY_IDLE_MS)||(room.phase==='ended'&&idle>ENDED_IDLE_MS);
+    const inGame=room.phase!=='lobby'&&room.phase!=='ended';
+    const expired=(room.phase==='lobby'&&idle>LOBBY_IDLE_MS)||(room.phase==='ended'&&idle>ENDED_IDLE_MS)
+      ||(inGame&&!humanConnected(room)&&idle>ABANDON_MS);
     if(!expired) continue;
     clearTimer(room);
     for(const p of room.players.values()){
