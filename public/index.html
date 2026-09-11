@@ -163,7 +163,7 @@
   <div class="err" id="err"></div>
 
   <div id="s-home">
-    <div class="art" id="art-home" style="display:none"><img src="art/01_cover.jpg" onload="$('art-home').style.display=''" onerror="$('art-home').remove()"></div>
+    <div class="art" id="art-home" style="display:none"><img src="art/01_cover.jpg" onload="this.parentNode.style.display=''" onerror="this.parentNode.remove()"></div>
     <div class="card">
       <h2>加入遊戲</h2>
       <label>你的暱稱</label><input id="name" maxlength="12" placeholder="輸入暱稱">
@@ -198,7 +198,7 @@
   </div>
 
   <div id="s-lobby" class="hide">
-    <div class="art" id="art-lobby" style="display:none"><img src="art/02_lobby.jpg" onload="$('art-lobby').style.display=''" onerror="$('art-lobby').remove()"></div>
+    <div class="art" id="art-lobby" style="display:none"><img src="art/02_lobby.jpg" onload="this.parentNode.style.display=''" onerror="this.parentNode.remove()"></div>
     <div class="card"><h2>房間代碼 <span id="lobbyname" style="color:var(--muted);font-size:.85rem;font-weight:400"></span></h2><div class="code" id="roomcode">----</div>
       <div class="hint">把這代碼給朋友加入，或直接分享連結（點了免輸房號密碼）。</div>
       <div class="row2">
@@ -307,7 +307,7 @@
   </div>
 
   <div id="s-end" class="hide">
-    <div class="art" id="art-end" style="display:none"><img id="art-end-img" onload="$('art-end').style.display=''" onerror="$('art-end').style.display='none'"></div>
+    <div class="art" id="art-end" style="display:none"><img id="art-end-img" onload="this.parentNode.style.display=''" onerror="this.parentNode.style.display='none'"></div>
     <div class="card">
       <div class="theend">📖 THE END</div>
       <div class="banner" id="endbanner"></div>
