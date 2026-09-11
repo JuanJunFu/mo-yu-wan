@@ -47,6 +47,20 @@
   .status{text-align:center;color:var(--gold);font-weight:900;margin:4px 0;font-size:1.1rem}
   .prep{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px}
   .prep span{background:var(--strip);border:1px solid var(--line);border-radius:99px;padding:3px 12px;font-size:.85rem;color:var(--ink)}
+  /* 補給市場（三張河道） */
+  .market{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0}
+  .mcard{border:1.5px solid var(--kraft);border-radius:8px;padding:8px 6px;text-align:center;background:linear-gradient(180deg,#faf1da,#eee0ba);box-shadow:0 1px 3px rgba(74,44,20,.2)}
+  .mcard.mboss{border-color:var(--red);background:linear-gradient(180deg,#f8ecdc,#f0dcc4)}
+  .mcard .mi{font-size:1.4rem}.mcard .mn{font-weight:800;font-size:.85rem}.mcard .md{font-size:.68rem;color:var(--muted);min-height:2.2em;line-height:1.25}
+  .mcard button{margin-top:5px;padding:7px 4px;font-size:.85rem}
+  /* 加班/深呼吸 橫幅 */
+  .otbar{border:2px solid var(--red);background:#f8e8dc;border-radius:8px;padding:8px 10px;margin:7px 0;font-size:.88rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .otbar button{width:auto;margin:0;padding:8px 12px;font-size:.85rem;flex:0 0 auto}
+  .otbar.calm{border-color:var(--green);background:#edf3e7}
+  /* 賭命衝刺 */
+  .riskbtn{background:linear-gradient(180deg,#f5ecd4,#e8d9b2);color:#7a3020;border:2px dashed var(--red);text-shadow:none;box-shadow:none;font-weight:800}
+  .riskbtn.on{background:var(--red);color:#fff;border-style:solid}
+  .riskbtn:disabled{opacity:.35}
   /* 罩學弟：醒目大按鈕列 */
   .helpbar{border:2px solid var(--blue);background:#e9eff5;border-radius:8px;padding:8px 10px;margin:8px 0}
   .helpbar .hb-note{font-size:.75rem;color:var(--muted);margin-left:6px}
@@ -175,7 +189,8 @@
       <ul class="plist" id="roomlist"><li style="color:var(--muted)">載入中…</li></ul>
       <button class="ghost" onclick="refreshRooms()">🔄 重新整理</button>
     </div>
-    <div class="hint">3～6 人。老闆派工作、員工邊做邊摸。撐到下班、摸魚最多的當摸魚王。</div>
+    <div class="hint" style="font-size:.95rem;color:var(--wood2);font-weight:800">「你是牛馬，還是摸魚王？」</div>
+    <div class="hint">3～6 人。老闆派工作、員工邊做邊摸。撐到下班、偷懶點數 💰 最高的當摸魚王；愛加班的小心變過勞牛馬 🐂。</div>
     <div id="rules-home"></div>
   </div>
 
@@ -220,16 +235,19 @@
       <div class="timer hide" id="timer"></div>
       <div class="status" id="status"></div>
       <div id="patternbox"></div>
+      <div id="econbox"></div>
       <div id="mytask"></div>
 
       <!-- 老闆行政 -->
       <div id="admin" class="hide">
+        <div id="marketbox"></div>
         <div id="adminboss" class="hide">
           <div class="hint" id="adminhint"></div>
           <div style="font-size:.82rem;color:var(--kraft2);margin:6px 0 2px">派任務</div>
           <ul class="plist" id="assignlist"></ul>
           <div id="promotebox"></div>
           <div id="firebox"></div>
+          <div id="otbox"></div>
           <button onclick="sock.emit('beginRound')">進入本回合 ▶</button>
         </div>
         <div id="adminwait" class="hint hide"></div>
@@ -240,6 +258,7 @@
         <div id="helpbox"></div>
         <div id="handbox"></div>
         <div class="zones" id="empzones"></div>
+        <div id="riskybox"></div>
         <button id="empsubmit" onclick="submitEmp()">選好後按我送出</button>
       </div>
       <!-- 幽靈作祟 -->
@@ -324,7 +343,45 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null, empPick=null;
+const sock=io(); let ST=null, bossPicks=[], timerIv=null, supPick=null, helpTarget=null, selCard=null, ghostMode=null, empPick=null, riskyOn=false;
+function buyCard(i){sock.emit('buyCard',{idx:i},r=>{if(r&&r.error)err(r.error);});}
+function breathe(){sock.emit('breathe',r=>{if(r&&r.error)err(r.error);});}
+function refuseOT(){sock.emit('refuseOvertime',r=>{if(r&&r.error)err(r.error);});}
+function toggleRisky(){riskyOn=!riskyOn;renderEmpZones();}
+function renderMarket(){
+  const you=ST.you, m=ST.market||[];
+  if(!you){$('marketbox').innerHTML='';return;}
+  if(you.role==='boss'){
+    // 老闆＝固定供應槽：加班令（河道是員工福利社）
+    const has=(you.hand||[]).some(c=>c.type==='overtime');
+    const dis=you.bought||has||(you.budget||0)<3;
+    $('marketbox').innerHTML=`<div style="font-size:.82rem;color:var(--kraft2);margin:4px 0 4px">🛒 補給市場｜💼 部門經費 <b>${you.budget||0}</b>（員工每交差 +1）</div>
+      <div class="market" style="grid-template-columns:1fr"><div class="mcard mboss"><div class="mi">🕘</div><div class="mn">加班令</div><div class="md">指定員工本回合不能摸魚；他認真做領加班費 +2💰 但過勞 +1💓</div><button ${dis?'disabled':''} onclick="buyCard(-1)">${has?'手上已有，先打出去':'買 3 經費'}</button></div></div>`;
+    return;
+  }
+  if(!m.length){$('marketbox').innerHTML='';return;}
+  $('marketbox').innerHTML=`<div style="font-size:.82rem;color:var(--kraft2);margin:4px 0 4px">🛒 補給市場（花的是你的💰＝王位分數，每回合限購 1）</div><div class="market">`
+    +m.map((c,i)=>{
+      const afford=you.points>=c.price&&(you.hand||[]).length<3;
+      const dis=!you.alive||you.bought||afford===false;
+      return `<div class="mcard"><div class="mi">${c.icon}</div><div class="mn">${esc(c.name)}</div><div class="md">${esc(c.desc)}</div><button ${dis?'disabled':''} onclick="buyCard(${i})">${c.price} 💰</button></div>`;
+    }).join('')+'</div>';
+}
+function renderEcon(){
+  const you=ST&&ST.you; let h='';
+  if(you&&you.role==='emp'&&you.alive&&(ST.phase==='admin'||ST.phase==='choosing')){
+    if(you.overtime) h+=`<div class="otbar">🕘 <b>老闆要求你加班！</b>本回合不能摸魚（認真做＝加班費+2💰、過勞+1💓）<button onclick="refuseOT()" ${you.points>=3?'':'disabled'}>付 3💰 請假開溜</button></div>`;
+    if(!you.breathed&&you.anxiety>=ST.anxietyOut-2) h+=`<div class="otbar calm">😮‍💨 心悸快爆了！<button onclick="breathe()" ${you.points>=3?'':'disabled'}>花 3💰 深呼吸（💓−1）</button></div>`;
+  }
+  $('econbox').innerHTML=h;
+}
+function renderBossOT(){
+  const you=ST.you; const n=(you.hand||[]).filter(c=>c.type==='overtime').length;
+  if(!n){$('otbox').innerHTML='';return;}
+  const targets=ST.players.filter(p=>p.role==='emp'&&p.alive&&!p.isSupervisor);
+  $('otbox').innerHTML=`<div style="font-size:.82rem;color:#a83226;margin:8px 0 2px">🕘 加班令 ×${n}（他本回合不能摸魚；認真做領加班費）</div><ul class="plist">`
+    +targets.map(p=>`<li><span>${esc(p.name)}　💰${p.points}</span><button style="width:auto;margin:0;padding:6px 12px;background:var(--red);color:#fff" onclick="sock.emit('orderOvertime',{targetId:'${p.id}'},r=>{if(r&&r.error)err(r.error)})">要求加班</button></li>`).join('')+'</ul>';
+}
 const seg={bossmode:'host',senmode:'balanced',threshold:'mid',solocount:'4'};
 function $(id){return document.getElementById(id)}
 function show(id){['s-home','s-lobby','s-game','s-end','s-spec'].forEach(s=>$(s).classList.toggle('hide',s!==id))}
@@ -405,7 +462,8 @@ function submitBoss(){if(bossPicks.length!==ST.bossInspect)return err('請選 '+
 function pickEmp(action,zone){empPick={action,zone:zone||null};renderEmpZones();}
 function submitEmp(){
   if(!empPick)return err('先選這回合要去哪／做什麼');
-  sock.emit('submitChoice',{action:empPick.action,zone:empPick.zone,helpTarget,cardIdx:selCard},r=>{if(r&&r.error)return err(r.error);});}
+  const rg=(empPick.action==='slack')?(ST.zones[empPick.zone].slack+(ST.you.seniority==='senior'?-1:1)):0;
+  sock.emit('submitChoice',{action:empPick.action,zone:empPick.zone,helpTarget,cardIdx:selCard,risky:riskyOn&&rg>=2},r=>{if(r&&r.error)return err(r.error);});}
 function ghostAct(type,targetId){ghostMode=null;sock.emit('submitChoice',{ghostAction:{type,targetId}},r=>{if(r&&r.error)return err(r.error);});}
 function ghostWarnMenu(){ghostMode=ghostMode==='warn'?null:'warn';renderGhost();}
 function toggleCard(i){selCard=(selCard===i)?null:i;renderEmpZones();}
@@ -458,8 +516,9 @@ function renderGame(){
     const pips='💓'.repeat(a)+'🤍'.repeat(Math.max(0,ST.anxietyOut-a));
     $('mystats').innerHTML=`<b style="font-size:1.15rem;letter-spacing:1px">${pips}</b>${anxHot&&you.alive?' <b style="color:#a83226">⚠️</b>':''}　🐟<b>${you.slackCount}</b>　<span style="opacity:.7">💰${you.points}</span>${you.canBeFired?' <span class="tag t-boss">逾期</span>':''}${you.alive?'':' <b style="color:#a83226">👻</b>'}`;
   } else {
-    $('mystats').innerHTML=`存活員工 <b>${ST.players.filter(p=>p.role==='emp'&&p.alive).length}</b>　任務完成 <b>${ST.tasksDone}/${ST.tasksIssued}</b>（門檻 ${Math.round(ST.completeThreshold*100)}%）${ST.supervisorName?'　主管:'+esc(ST.supervisorName):''}`;
+    $('mystats').innerHTML=`存活員工 <b>${ST.players.filter(p=>p.role==='emp'&&p.alive).length}</b>　任務 <b>${ST.tasksDone}/${ST.tasksIssued}</b>（門檻 ${Math.round(ST.completeThreshold*100)}%）　💼經費 <b>${you.budget||0}</b>${ST.supervisorName?'　主管:'+esc(ST.supervisorName):''}`;
   }
+  renderEcon();
   // 老闆行為模式卡（bot 老闆專屬）：一行圖示化
   $('patternbox').innerHTML = (ST.bossPattern&&you.role==='emp')
     ? `<div class="task" style="border-color:var(--purple);padding:7px 14px">📇 <b>${esc(ST.bossPattern.name)}</b>　<span style="font-size:.82rem;color:var(--muted)">${esc(ST.bossPattern.hint)}</span></div>` : '';
@@ -473,7 +532,9 @@ function renderGame(){
     $('admin').classList.remove('hide');
     const amBoss=you.role==='boss';
     $('adminboss').classList.toggle('hide',!amBoss); $('adminwait').classList.toggle('hide',amBoss);
+    renderMarket();
     if(amBoss){
+      renderBossOT();
       $('adminhint').textContent=`任務卡剩 ${ST.admin.taskLeft}。派工作／升職／資遣後按「進入本回合」。`;
       $('assignlist').innerHTML=ST.admin.needTask.length?ST.admin.needTask.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px" onclick="sock.emit('assignTask',{targetId:'${p.id}'})">派任務</button></li>`).join(''):'<li style="color:var(--muted)">所有員工都有任務了</li>';
       renderPromoteFire();
@@ -562,9 +623,12 @@ function renderEmpZones(){
   const cells=[];
   cells.push(`<div class="zone work ${pk('work')?'sel':''}" onclick="pickEmp('work')"><div class="ic">💼</div><div class="nm">認真工作</div><div class="m">${hasTask?'📋+2 ':''}💓−1</div></div>`);
   cells.push(`<div class="zone safe ${pk('idle')?'sel':''}" onclick="pickEmp('idle')"><div class="ic">🏢</div><div class="nm">回辦公室</div><div class="m">🛡️安全 💓−1</div></div>`);
-  for(const k of ST.slackZones){const z=ST.zones[k];const dis=(you.lastZone===k);
-    cells.push(`<div class="zone ${pk('slack',k)?'sel':''}" style="${dis?'opacity:.35;pointer-events:none':''}" onclick="${dis?'':`pickEmp('slack','${k}')`}"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">💰+${z.slack} 💓+${z.anxiety}${hasTask?' 📋+1':''}${dis?' 🚫剛待過':''}</div></div>`);}
+  for(const k of ST.slackZones){const z=ST.zones[k];const dis=(you.lastZone===k)||you.overtime;
+    cells.push(`<div class="zone ${pk('slack',k)?'sel':''}" style="${dis?'opacity:.35;pointer-events:none':''}" onclick="${dis?'':`pickEmp('slack','${k}')`}"><div class="ic">${ZI[k]}</div><div class="nm">${z.name}</div><div class="m">💰+${z.slack} 💓+${z.anxiety}${hasTask?' 📋+1':''}${you.overtime?' 🕘':(dis?' 🚫剛待過':'')}</div></div>`);}
   $('empzones').innerHTML=cells.join('');
+  // 賭命衝刺：只有選了 💰+2 以上的摸魚區才點得下去
+  const rg=(empPick&&empPick.action==='slack')?(ST.zones[empPick.zone].slack+(you.seniority==='senior'?-1:1)):0;
+  $('riskybox').innerHTML=`<button class="riskbtn ${riskyOn&&rg>=2?'on':''}" ${rg>=2?'':'disabled'} onclick="toggleRisky()">🎲 拼了！成功💰×2、無論成敗💓+2${rg>=2?'':'（限💰+2以上的區）'}</button>`;
   // 送出鈕文字＝當前選擇摘要（含將出的道具卡）；送出後仍可改選重送（大家都交齊前有效）
   const btn=$('empsubmit');
   const cardNote=(selCard!=null&&you.hand&&you.hand[selCard])?`（出 ${you.hand[selCard].icon}${esc(you.hand[selCard].name)}）`:'';
@@ -584,7 +648,7 @@ function pickBoss(k){const i=bossPicks.indexOf(k);if(i>=0)bossPicks.splice(i,1);
 let revAnimKey=null, revTimers=[];
 function rvT(fn,ms){revTimers.push(setTimeout(fn,ms));}
 function renderReveal(){
-  bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null; empPick=null;
+  bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null; empPick=null; riskyOn=false;
   const r=ST.reveal;if(!r)return;
   $('revtitle').textContent=`第 ${r.round} 回合揭曉`;
   // 詳細文字（收合備查）
@@ -700,10 +764,12 @@ const RULES_BODY=`
 <p>🗣️ <b>藉口卡</b>：被抓時自動使用，這次不算也不加心悸。道具卡要在選動作前點選：🧃提神飲料（心悸 −2）｜🖨️影印機卡紙（老闆少巡一區）｜💪雞精加持（摸魚成功 +2 分）。</p>
 <h4>👻 出局變幽靈（不是坐板凳）</h4>
 <p>出局後每 2 回合可作祟一次：<b>騷擾老闆</b>（隨機少巡一區）｜<b>打斷協查</b>（主管白跑）｜<b>通風報信</b>（救一位快被抓的同事）。</p>
+<h4>🛒 補給市場＆經濟（老闆行政時開市）</h4>
+<p>隨機翻 3 張卡：員工花 💰 買（藉口3／提神3／雞精3／卡紙2，每回限購 1）——<b>花的就是你的王位分數</b>。老闆用「部門經費」（員工每交差 +1）買 🕘<b>加班令</b>：被點名者本回合不能摸魚，認真做領加班費 +2💰 但過勞 +1💓，或付 3💰 請假開溜。摸魚時可勾 🎲<b>拼了</b>：成功 💰×2、無論成敗 💓+2（限 💰+2 以上的區）。心悸快爆可花 3💰 😮‍💨深呼吸（💓−1，每回 1 次）。</p>
 <h4>📏 兩條限制</h4>
 <p>員工不能連兩回合待同一摸魚區；老闆不能連查同一地方三次。</p>
 <h4>🏆 獲勝條件</h4>
-<div class="win"><b>員工個人</b>：撐到下班還活著、而且<b>摸魚次數最多</b> → 摸魚王 👑</div>
+<div class="win"><b>員工個人</b>：撐到下班還活著、而且<b>偷懶點數 💰 最高</b> → 摸魚王 👑</div>
 <div class="win"><b>員工陣營</b>：讓老闆的<b>任務完成率低於門檻</b>，且至少一人存活</div>
 <div class="win boss"><b>老闆</b>：<b>任務完成率達門檻</b>（開房可設六～八成），或把員工<b>全部淘汰</b></div>
 <h4>🏅 下班後 · 綜合評分</h4>

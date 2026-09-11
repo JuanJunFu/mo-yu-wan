@@ -50,11 +50,28 @@ const TASKS = [
 
 // 藉口/道具卡：藉口＝被抓時自動觸發；道具＝暗選時出牌、結算時生效
 const CARD_DEFS = {
-  excuse: { icon:'🗣️', kind:'passive', desc:'被抓時自動使用：這次不算、不加心悸' },
+  excuse: { icon:'🗣️', kind:'passive', name:'藉口', desc:'被抓時自動使用：這次不算、不加心悸' },
   energy: { icon:'🧃', kind:'item', name:'提神飲料', desc:'出牌：本回合結算心悸 −2' },
   jam:    { icon:'🖨️', kind:'item', name:'影印機卡紙', desc:'出牌：老闆本回合隨機少巡一區' },
   boost:  { icon:'💪', kind:'item', name:'雞精加持', desc:'出牌：本回合摸魚成功分數 +2' },
+  overtime:{ icon:'🕘', kind:'boss', name:'加班令', desc:'指定 1 名員工本回合不能摸魚；他認真做可領加班費 +2💰 但過勞 +1💓' },
 };
+// ---------- 點數經濟（2026-09-11 MVP）：💰=偷懶點數（也是王位分數）、老闆用部門經費 ----------
+const PRICES = { excuse:3, energy:3, jam:2, boost:3, overtime:3 }; // energy/boost≥3：天然匯率約2-3💰/💓，低於此=套利洞
+const OT_REFUSE_COST = 3;     // 付 3💰「請假開溜」拒絕加班
+const SHOP_SEC = 10;          // 單人模式 bot 老闆行政時的補給採購窗口
+const BREATHE_COST = 3;       // 深呼吸：3💰 洗 1💓（限心悸≥門檻-2、每回合 1 次——防無限農場）
+const RISKY_ANX = 2;          // 賭命衝刺：無論成敗 +2💓，摸魚成功分 ×2
+const BOSS_START_BUDGET = 3;  // 老闆開局部門經費；員工每完成 1 件任務 +1
+function buildMarketDeck(){
+  const d=[]; // 河道只放員工卡；加班令＝老闆專屬固定供應槽（不靠運氣翻）
+  for(let i=0;i<5;i++) d.push({type:'excuse', name:EXCUSE_NAMES[i%EXCUSE_NAMES.length]});
+  for(let i=0;i<4;i++) d.push({type:'energy', name:CARD_DEFS.energy.name});
+  for(let i=0;i<3;i++) d.push({type:'jam', name:CARD_DEFS.jam.name});
+  for(let i=0;i<4;i++) d.push({type:'boost', name:CARD_DEFS.boost.name});
+  return d;
+}
+function refillMarket(room){ while(room.market.length<3&&room.marketDeck.length) room.market.push(room.marketDeck.shift()); }
 const EXCUSE_NAMES = ['肚子痛先閃','幫客戶送件','電腦當機重開','去修印表機','幫老闆買咖啡','量個體溫'];
 function buildCardDeck(){
   const deck = [];
@@ -123,6 +140,7 @@ function viewFor(room, pid){
     bossInspect:room.config.bossInspect, anxietyOut:room.config.anxietyOut, completeThreshold:room.config.completeThreshold,
     tasksIssued:room.tasksIssued, tasksDone:room.tasksDone, timerEndsAt:room.timerEndsAt||null, revealSkipAt:room.revealSkipAt||null,
     zones:ZONES, slackZones:SLACK_ZONES, solo:!!room.solo,
+    market: (room.market||[]).map(c=>({type:c.type,name:CARD_DEFS[c.type].name,icon:CARD_DEFS[c.type].icon,desc:CARD_DEFS[c.type].desc,price:PRICES[c.type]||2,bossOnly:c.type==='overtime'})),
     bossPattern: room.bossPattern ? { key:room.bossPattern, name:BOSS_PATTERNS[room.bossPattern].name, hint:BOSS_PATTERNS[room.bossPattern].hint } : null,
     supervisorName: room.supervisorId ? (room.players.get(room.supervisorId)||{}).name : null,
     you: me ? {
@@ -133,6 +151,8 @@ function viewFor(room, pid){
       submitted: me.role==='boss' ? room.choices.boss!=null : (room.choices.emp[me.id]!=null),
       isHost: me.id===room.hostId,
       hand: me.hand.map(c=>({type:c.type, name:c.name, icon:CARD_DEFS[c.type].icon, kind:CARD_DEFS[c.type].kind, desc:CARD_DEFS[c.type].desc})),
+      budget: me.budget||0, bought: me._boughtRound===room.round, breathed: me._breathedRound===room.round,
+      overtime: me._otRound===room.round,
       ghostCooldown: me.ghostCooldown,
       ghostActed: !!(room.choices.ghost&&room.choices.ghost[me.id]),
       ghostTargets: (me.isGhost&&room.phase==='choosing') ? aliveEmps(room).map(e=>({id:e.id,name:e.name})) : [],
@@ -176,10 +196,13 @@ function startGame(room, opts){
     p.seniority=p.role==='emp'?(seniorSet.has(p.id)?'senior':'junior'):null;
     p.alive=true; p.isGhost=false; p.slackCount=0; p.points=0; p.anxiety=0; p.lastZone=null; p.task=null;
     p.immunity=(p.seniority==='senior')?1:0; p.isSupervisor=false; p.supTermLeft=0; p.helpCooldown=0; p.canBeFired=false;
-    p.hand=[]; p.ghostCooldown=0;
+    p.hand=[]; p.ghostCooldown=0; p.otCount=0;
   }
   room.cardDeck=shuffle(buildCardDeck());
   for(let i=0;i<START_HAND;i++) for(const p of room.players.values()) if(p.role==='emp') drawCard(room,p);
+  // 補給市場（三張河道）＋老闆部門經費
+  room.marketDeck=shuffle(buildMarketDeck()); room.market=[]; refillMarket(room);
+  for(const p of room.players.values()){ p.budget=(p.id===bossId)?BOSS_START_BUDGET:0; p._boughtRound=0; p._breathedRound=0; p._otRound=0; }
   const n=ids.length;
   room.config.rounds=opts.rounds||(n<=3?6:8);
   room.config.bossInspect=(n<=3)?2:1;
@@ -212,6 +235,7 @@ function enterAdmin(room){
   log(room, `— 第 ${room.round} 回合：老闆行政（派工作／升職／資遣）—`);
   startTimer(room, ADMIN_SEC, ()=>{ enterChoose(room); broadcast(room); });
   if(b&&b.isBot) scheduleBotAdmin(room);
+  scheduleBotEconomy(room);
 }
 function enterChoose(room){
   room.phase='choosing'; room.choices={emp:{},boss:null,ghost:{}};
@@ -287,8 +311,14 @@ function resolveRound(room){
       r.note = supZone ? `主管，協查【${ZONES[supZone].name}】（免疫被抓）` : '主管，未協查（免疫被抓）';
       e.lastZone='office';
     } else if(ch.action==='work'){
-      safeCount++; r.zoneName='認真工作'; r.working=true; pending[e.id]-=1; e.points=Math.max(0,e.points-1);
-      if(e.task){ e.task.progress+=2; r.note=`認真工作：任務 +2（${e.task.progress}/${e.task.need}）、心悸 −1、分數 −1`; } else r.note='認真工作：心悸 −1、分數 −1';
+      safeCount++; r.zoneName='認真工作'; r.working=true;
+      const ot=(e._otRound===room.round);
+      if(ot){ e.points+=2; pending[e.id]+=1; r.ot=true; e.otCount=(e.otCount||0)+1;
+        if(e.task){ e.task.progress+=2; r.note=`🕘 加班！任務 +2（${e.task.progress}/${e.task.need}）、加班費 +2💰、過勞 +1💓`; } else r.note='🕘 加班！加班費 +2💰、過勞 +1💓';
+      } else {
+        pending[e.id]-=1; e.points=Math.max(0,e.points-1);
+        if(e.task){ e.task.progress+=2; r.note=`認真工作：任務 +2（${e.task.progress}/${e.task.need}）、心悸 −1、💰−1`; } else r.note='認真工作：心悸 −1、💰−1';
+      }
       e.lastZone='office';
     } else if(ch.action==='idle'||ch.zone==='office'){
       safeCount++; r.zoneName='辦公室'; pending[e.id]-=1; r.note='回辦公室休息（安全、不算摸魚、心悸 −1）'; e.lastZone='office';
@@ -309,10 +339,12 @@ function resolveRound(room){
       } else {
         let gain=z.slack+(e.seniority==='senior'?-1:1); if(gain<0)gain=0;
         if(boostSet.has(e.id)) gain+=2;
+        if(ch.risky) gain*=2;
         e.slackCount++; e.points+=gain; pending[e.id]+=z.anxiety; r.gain=gain;
-        r.note=`摸魚成功！次數 +1（分 +${gain}，心悸 +${z.anxiety}）`;
+        r.note=`摸魚成功！💰+${gain}、心悸 +${z.anxiety}${ch.risky?'（🎲拼了×2）':''}`;
         if(e.task){ e.task.progress+=1; r.note+=`；邊做邊摸 任務 +1（${e.task.progress}/${e.task.need}）`; }
       }
+      if(ch.risky){ pending[e.id]+=RISKY_ANX; r.risky=true; if(r.caught===true) r.note+=`（🎲拼了失手，額外 +${RISKY_ANX}💓）`; }
       e.lastZone=zone;
     }
     results.push(r);
@@ -323,7 +355,8 @@ function resolveRound(room){
     if(!e.task) continue; const t=e.task;
     if(t.progress>=t.need){ room.tasksDone++; e.points+=1;
       const c=drawCard(room,e);
-      log(room,`✅【${e.name}】完成「${t.name}」(+1 分${c?'、抽 1 張卡':''})`); e.task=null; }
+      const bb=bossOf(room); if(bb) bb.budget=(bb.budget||0)+1; // 員工交差＝老闆部門經費 +1
+      log(room,`✅【${e.name}】完成「${t.name}」(+1💰${c?'、抽 1 張卡':''}；老闆經費 +1)`); e.task=null; }
     else { t.deadlineLeft--;
       if(t.deadlineLeft<=0){
         if(t.state!=='grace'){ t.state='grace'; t.deadlineLeft=1; log(room,`⏳【${e.name}】任務到期，給一回合補交`); }
@@ -367,8 +400,9 @@ function checkWin(room){
   if(room.round>=room.config.rounds){
     const rate=room.tasksIssued>0?room.tasksDone/room.tasksIssued:0;
     if(rate>=room.config.completeThreshold){ endGame(room,'boss',`業績達標（完成率 ${Math.round(rate*100)}% ≥ ${Math.round(room.config.completeThreshold*100)}%）`); return; }
-    const rank=[...alive].sort((a,b)=>b.slackCount-a.slackCount||a.anxiety-b.anxiety);
-    endGame(room,'emp',`摸魚王是【${rank[0].name}】（摸魚 ${rank[0].slackCount} 次）`, rank[0].id);
+    // 經濟地基：摸魚王由 💰（偷懶點數）決定——花錢＝真的割王位肉；次數降為稱號 flavor
+    const rank=[...alive].sort((a,b)=>b.points-a.points||a.anxiety-b.anxiety);
+    endGame(room,'emp',`摸魚王是【${rank[0].name}】（偷懶 ${rank[0].points} 💰）`, rank[0].id);
   }
 }
 
@@ -379,8 +413,9 @@ function endGame(room, side, reason, winnerEmpId){
   const ranking=emps.map(p=>{
     const comp=Math.max(0, p.points + p.slackCount*2 + (p.alive?5:0) - p.anxiety);
     let title;
-    if(!p.alive) title='壯烈畢業 💀';
-    else if(p.slackCount===0) title='勞模 😇';
+    if(!p.alive) title=((p.otCount||0)>=2)?'過勞牛馬 🐂💦':'壯烈畢業 💀';
+    else if((p.otCount||0)>=2) title='加班狂牛馬 🐂';
+    else if(p.slackCount===0) title='全勤牛馬 🐂';
     else if(p.anxiety>=th-2) title='驚弓之鳥 😰';
     else if(p.seniority==='senior') title='老油條 🦉';
     else title='摸魚同好 😎';
@@ -419,6 +454,10 @@ function botEmpChoice(room, e){
   }
   const out=room.config.anxietyOut, style=e.botStyle||'steady';
   const hot=e.anxiety>=out-2, warm=e.anxiety>=out-3;
+  // 被加班令點名：只能認真做（領加班費）或發呆
+  if(e._otRound===room.round){
+    return { action: Math.random()<0.85?'work':'idle', zone:'office' };
+  }
   const cands=[];
   cands.push({ score: 2+(hot?6:0)+(e.anxiety>0?1:0)+(style==='steady'?1:0)-(style==='greedy'?1:0),
     choice:{action:'idle',zone:'office'} });
@@ -445,7 +484,43 @@ function botEmpChoice(room, e){
     const j=aliveEmps(room).find(x=>x.seniority==='junior'&&!x.isSupervisor&&x.anxiety>=out-2);
     if(j&&Math.random()<0.5) helpTarget=j.id;
   }
-  return { ...choice, helpTarget, cardIdx };
+  // 賭命衝刺：貪懶型在還很安全＋落後時偶爾拼一把（限 gain≥2 的區）
+  let risky=false;
+  if(choice.action==='slack'&&style==='greedy'&&e.anxiety<=out-4){
+    const g=ZONES[choice.zone].slack+(e.seniority==='senior'?-1:1);
+    const lead=Math.max(...aliveEmps(room).map(x=>x.points));
+    if(g>=2&&e.points<lead&&Math.random()<0.25) risky=true;
+  }
+  return { ...choice, helpTarget, cardIdx, risky };
+}
+
+// bot 員工的行政階段經濟行為：深呼吸＋逛補給市場
+function scheduleBotEconomy(room){
+  const round=room.round;
+  for(const p of room.players.values()){
+    if(!p.isBot||p.role!=='emp'||!p.alive) continue;
+    setTimeout(()=>{
+      if(!rooms.has(room.code)||room.phase!=='admin'||room.round!==round||!p.alive) return;
+      const out=room.config.anxietyOut;
+      if(p.anxiety>=out-2&&p.points>=BREATHE_COST+1&&p._breathedRound!==round){
+        p.points-=BREATHE_COST; p.anxiety=Math.max(0,p.anxiety-1); p._breathedRound=round;
+        log(room,`😮‍💨【${p.name}】花 ${BREATHE_COST}💰 深呼吸壓驚（💓−1）`); broadcast(room);
+      }
+      if(p._boughtRound===round||p.hand.length>=HAND_LIMIT) return;
+      const wantBuy={greedy:0.35,steady:0.8,swing:0.5}[p.botStyle||'steady'];
+      if(Math.random()>wantBuy) return;
+      const hasExcuse=p.hand.some(c=>c.type==='excuse');
+      let pick=-1;
+      if(!hasExcuse) pick=room.market.findIndex(c=>c.type==='excuse'&&p.points>=PRICES.excuse+1);
+      if(pick<0&&p.anxiety>=out-3) pick=room.market.findIndex(c=>c.type==='energy'&&p.points>=PRICES.energy+1);
+      if(pick<0) pick=room.market.findIndex(c=>c.type==='boost'&&p.points>=PRICES.boost+2);
+      if(pick<0) return;
+      const card=room.market[pick]; const price=PRICES[card.type]||2;
+      p.points-=price; p.hand.push({type:card.type,name:card.name}); p._boughtRound=round;
+      room.market.splice(pick,1); refillMarket(room);
+      log(room,`🛒【${p.name}】買了 ${CARD_DEFS[card.type].icon}${CARD_DEFS[card.type].name}`); broadcast(room);
+    }, rand(1500,SHOP_SEC*900));
+  }
 }
 
 // 老闆 bot 巡查：照「行為模式卡」出牌（員工看得到卡＝可讀可破，讀 AI 的樂趣）
@@ -503,6 +578,18 @@ function botAdmin(room){
         room.bossFires--; log(room,`🔨 老闆資遣了【${f.name}】！（剩 ${room.bossFires} 次）`); }
     }
   }
+  // 部門經費夠就從固定槽補一張加班令，手上有就對「當前偷懶王」打出（記仇橡皮筋）
+  if(b._boughtRound!==room.round&&!b.hand.some(c=>c.type==='overtime')&&(b.budget||0)>=PRICES.overtime){
+    b.budget-=PRICES.overtime; b.hand.push({type:'overtime',name:CARD_DEFS.overtime.name}); b._boughtRound=room.round;
+    log(room,`🛒【${b.name}】買了 🕘加班令`);
+  }
+  if(b.hand.some(c=>c.type==='overtime')&&Math.random()<0.8){
+    const lead=[...aliveEmps(room)].filter(p=>!p.isSupervisor&&p._otRound!==room.round).sort((a,c)=>c.points-a.points)[0];
+    if(lead&&lead.points>=3){
+      const ci=b.hand.findIndex(c=>c.type==='overtime'); b.hand.splice(ci,1); lead._otRound=room.round;
+      log(room,`🕘 老闆對【${lead.name}】打出加班令！本回合不能摸魚（認真做有加班費 +2💰）`);
+    }
+  }
 }
 
 function scheduleBotAdmin(room){
@@ -510,9 +597,13 @@ function scheduleBotAdmin(room){
   setTimeout(()=>{
     if(!rooms.has(room.code)||room.phase!=='admin'||room.round!==round) return;
     botAdmin(room); checkWin(room);
-    if(room.phase==='admin') enterChoose(room);
+    if(room.phase!=='admin'){ broadcast(room); return; }
+    // 有真人員工 → 留一段補給採購窗口（倒數顯示），沒有就直接開工
+    const humanEmp=[...room.players.values()].some(p=>!p.isBot&&p.role==='emp'&&p.alive&&p.connected);
+    if(humanEmp){ startTimer(room, SHOP_SEC, ()=>{ if(room.phase==='admin'){ enterChoose(room); broadcast(room); } }); }
+    else enterChoose(room);
     broadcast(room);
-  }, rand(1500,3000));
+  }, rand(1000,1800));
 }
 
 // choosing 進場時為每個 bot 排「思考延遲」後代打；寫入與真人共用 room.choices，湊齊同樣走 tryResolve
@@ -526,6 +617,11 @@ function scheduleBots(room){
         room.choices.boss={zones:botBossZones(room)}; tryResolve(room); broadcast(room); }, rand(2000,4500));
     } else if(p.alive){
       setTimeout(()=>{ if(!guard()||room.choices.emp[p.id]!=null) return;
+        // 貪懶 bot 錢夠時偶爾付錢拒絕加班（自由的代價）
+        if(p._otRound===room.round&&p.botStyle==='greedy'&&p.points>=OT_REFUSE_COST+3&&Math.random()<0.4){
+          p.points-=OT_REFUSE_COST; p._otRound=0;
+          log(room,`🏃【${p.name}】燒了 ${OT_REFUSE_COST}💰 請假開溜，拒絕加班！`);
+        }
         room.choices.emp[p.id]=botEmpChoice(room,p); tryResolve(room); broadcast(room); }, rand(1200,4000));
     } else if(p.isGhost&&p.ghostCooldown===0){
       setTimeout(()=>{ if(!guard()||room.choices.ghost[p.id]) return;
@@ -709,6 +805,69 @@ io.on('connection', (socket)=>{
     checkWin(room); broadcast(room);
   });
 
+  // ---- 點數經濟：補給市場（admin 階段限定；員工用💰、老闆用部門經費買加班令）----
+  socket.on('buyCard', ({idx}, cb)=>{
+    const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return cb&&cb({error:'只有老闆行政時間能採購'});
+    const me=room.players.get(socket.data.playerId); if(!me||!me.alive) return;
+    if(me._boughtRound===room.round) return cb&&cb({error:'每回合限購 1 件'});
+    // idx === -1 ＝老闆專屬固定供應槽：加班令
+    if(idx===-1){
+      if(me.role!=='boss') return cb&&cb({error:'加班令是老闆專屬'});
+      if(me.hand.some(c=>c.type==='overtime')) return cb&&cb({error:'手上已有一張加班令，先打出去'});
+      if((me.budget||0)<PRICES.overtime) return cb&&cb({error:`部門經費不足（要 ${PRICES.overtime}，剩 ${me.budget||0}）`});
+      me.budget-=PRICES.overtime; me.hand.push({type:'overtime',name:CARD_DEFS.overtime.name});
+      me._boughtRound=room.round; touch(room);
+      log(room,`🛒【${me.name}】買了 🕘加班令`);
+      return cb&&cb({ok:true}), broadcast(room);
+    }
+    const card=room.market[idx]; if(!card) return cb&&cb({error:'這格已被買走'});
+    const price=PRICES[card.type]||2;
+    if(me.role==='boss') return cb&&cb({error:'河道是員工福利社，老闆請買加班令'});
+    if(me.hand.length>=HAND_LIMIT) return cb&&cb({error:`手牌已滿（${HAND_LIMIT} 張）`});
+    if(me.points<price) return cb&&cb({error:`💰不夠（要 ${price}，剩 ${me.points}）——花的可是王位分數`});
+    me.points-=price; me.hand.push({type:card.type,name:card.name});
+    me._boughtRound=room.round;
+    room.market.splice(idx,1); refillMarket(room); touch(room);
+    log(room,`🛒【${me.name}】買了 ${CARD_DEFS[card.type].icon}${CARD_DEFS[card.type].name}`);
+    cb&&cb({ok:true}); broadcast(room);
+  });
+
+  // 深呼吸：3💰 洗 1💓（限心悸≥門檻-2、每回合 1 次）
+  socket.on('breathe', (cb)=>{
+    const room=rooms.get(socket.data.roomCode); if(!room||(room.phase!=='admin'&&room.phase!=='choosing')) return cb&&cb({error:'現在不是深呼吸的時候'});
+    const me=room.players.get(socket.data.playerId); if(!me||me.role!=='emp'||!me.alive) return cb&&cb({error:'不可用'});
+    if(me._breathedRound===room.round) return cb&&cb({error:'這回合已經深呼吸過了'});
+    if(me.anxiety<room.config.anxietyOut-2) return cb&&cb({error:'還不夠緊張，省著點花'});
+    if(me.points<BREATHE_COST) return cb&&cb({error:`💰不夠（要 ${BREATHE_COST}）`});
+    me.points-=BREATHE_COST; me.anxiety=Math.max(0,me.anxiety-1); me._breathedRound=room.round;
+    log(room,`😮‍💨【${me.name}】花 ${BREATHE_COST}💰 深呼吸壓驚（💓−1）`);
+    cb&&cb({ok:true}); broadcast(room);
+  });
+
+  // 拒絕加班：付 3💰 請假開溜（形態3 兩面張力——付不起就只能乖乖加班）
+  socket.on('refuseOvertime', (cb)=>{
+    const room=rooms.get(socket.data.roomCode); if(!room||(room.phase!=='admin'&&room.phase!=='choosing')) return cb&&cb({error:'現在不能請假'});
+    const me=room.players.get(socket.data.playerId); if(!me||me.role!=='emp'||!me.alive) return cb&&cb({error:'不可用'});
+    if(me._otRound!==room.round) return cb&&cb({error:'你沒有被要求加班'});
+    if(me.points<OT_REFUSE_COST) return cb&&cb({error:`💰不夠（要 ${OT_REFUSE_COST}）——只能乖乖加班了`});
+    me.points-=OT_REFUSE_COST; me._otRound=0;
+    log(room,`🏃【${me.name}】燒了 ${OT_REFUSE_COST}💰 請假開溜，拒絕加班！`);
+    cb&&cb({ok:true}); broadcast(room);
+  });
+
+  // 加班令：老闆行政階段打出手上的加班令
+  socket.on('orderOvertime', ({targetId}, cb)=>{
+    const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return cb&&cb({error:'只有行政時間能派加班'});
+    const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能要求加班'});
+    const ci=b.hand.findIndex(c=>c.type==='overtime'); if(ci<0) return cb&&cb({error:'手上沒有加班令（去補給市場買）'});
+    const t=room.players.get(targetId);
+    if(!t||t.role!=='emp'||!t.alive||t.isSupervisor) return cb&&cb({error:'這位員工不能被指派加班'});
+    if(t._otRound===room.round) return cb&&cb({error:'他這回合已經在加班了'});
+    b.hand.splice(ci,1); t._otRound=room.round;
+    log(room,`🕘 老闆對【${t.name}】打出加班令！本回合不能摸魚（認真做有加班費 +2💰）`);
+    cb&&cb({ok:true}); broadcast(room);
+  });
+
   socket.on('beginRound', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
     const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能開始本回合'});
@@ -742,6 +901,7 @@ io.on('connection', (socket)=>{
       room.choices.emp[me.id]={action:'supervise', zone: zone||null};
     } else {
       const action=payload.action; const helpTarget=payload.helpTarget||null;
+      const risky=!!payload.risky;
       let cardIdx=null;
       if(payload.cardIdx!=null){
         const c=me.hand[payload.cardIdx];
@@ -751,9 +911,12 @@ io.on('connection', (socket)=>{
       }
       if(action==='work'||action==='idle') room.choices.emp[me.id]={action,zone:'office',helpTarget,cardIdx};
       else if(action==='slack'){ const zone=payload.zone;
+        if(me._otRound===room.round) return cb&&cb({error:`🕘 你被要求加班，本回合不能摸魚！（可付 ${OT_REFUSE_COST}💰 請假開溜）`});
         if(!ZONES[zone]||zone==='office') return cb&&cb({error:'請選一個摸魚區'});
         if(me.lastZone===zone) return cb&&cb({error:`上回合已在「${ZONES[zone].name}」，換地方`});
-        room.choices.emp[me.id]={action:'slack',zone,helpTarget,cardIdx};
+        // 賭命衝刺限 gain≥2 的區（老鳥在低分區拼了=純懲罰，直接擋）
+        if(risky){ const g=ZONES[zone].slack+(me.seniority==='senior'?-1:1); if(g<2) return cb&&cb({error:'這區報酬太低，不值得拼命（🎲限💰+2以上的區）'}); }
+        room.choices.emp[me.id]={action:'slack',zone,helpTarget,cardIdx,risky};
       } else return cb&&cb({error:'無效動作'});
     }
     cb&&cb({ok:true});
