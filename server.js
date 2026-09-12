@@ -60,6 +60,7 @@ const CARD_DEFS = {
 // ---------- 點數經濟（2026-09-11 MVP）：💰=偷懶點數（也是王位分數）、老闆用部門經費 ----------
 const PRICES = { excuse:3, energy:3, jam:2, boost:3, overtime:3, mooch:2 }; // energy/boost≥3：天然匯率約2-3💰/💓，低於此=套利洞
 const WORK_WAGE = 1; // 認真工作有薪水！不可以白嫖——除非被同事凹
+const WORK_STREAK_LIMIT = 3; // 連續工作三回合過勞猝死；改做其他行動即中斷
 const OT_REFUSE_COST = 3;     // 付 3💰「請假開溜」拒絕加班
 // 憋氣機制（A′ 限縮版）：只有菜鳥能憋（老鳥走免死金牌線）；💓 計價＝天然凸成本自我節流
 const HOLD_COST  = { 30:1, 60:2 };  // 淺憋+1💓=30%、拚命憋+2💓=60%（無論老闆來不來都扣＝防無腦刷）
@@ -92,6 +93,13 @@ function drawCard(room, p){
   if (!room.cardDeck.length || p.hand.length >= HAND_LIMIT) return null;
   const c = room.cardDeck.shift(); p.hand.push(c); return c;
 }
+function drawRoundHand(room, p){
+  if(p._drawnRound===room.round || p.role!=='emp' || !p.alive) return [];
+  p._drawnRound=room.round; p.roundDraw=[];
+  const count=room.round===1?START_HAND:1;
+  for(let i=0;i<count;i++){const c=drawCard(room,p);if(c)p.roundDraw.push(c);}
+  return p.roundDraw;
+}
 const GHOST_ACTIONS = { haunt:'👻 騷擾老闆', warn:'📞 通風報信', disrupt:'🌀 打斷協查' };
 
 // ---------- c-lite 單人模式：老闆行為模式卡（開局翻給員工看＝「讀 AI」的樂趣） ----------
@@ -122,7 +130,7 @@ function lobbySnapshot(){
 }
 // 玩家身分 = 獨立 playerId（uuid），socket 只是可替換的傳輸管道（斷線重連 rebind、bot 可為 null）
 function newPid(){ return crypto.randomUUID().replace(/-/g,'').slice(0,16); }
-function mkPlayer(pid,socket,name){ return { id:pid, socket, name, connected:true, isBot:false, role:null, seniority:null,
+function mkPlayer(pid,socket,name){ return { id:pid, socket, name, connected:true, isBot:false, role:null, seniority:null, workStreak:0,
   alive:true, isGhost:false, slackCount:0, points:0, anxiety:0, immunity:0, lastZone:null, task:null,
   isSupervisor:false, supTermLeft:0, helpCooldown:0, canBeFired:false, voiceOn:false,
   hand:[], ghostCooldown:0 }; }
@@ -148,18 +156,22 @@ function viewFor(room, pid){
     code:room.code, name:room.name||null, phase:room.phase, round:room.round, rounds:room.config.rounds,
     bossInspect:room.config.bossInspect, anxietyOut:room.config.anxietyOut, completeThreshold:room.config.completeThreshold,
     tasksIssued:room.tasksIssued, tasksDone:room.tasksDone, timerEndsAt:room.timerEndsAt||null, revealSkipAt:room.revealSkipAt||null,
-    zones:ZONES, slackZones:SLACK_ZONES, solo:!!room.solo,
+    zones:ZONES, slackZones:SLACK_ZONES, solo:!!room.solo, adminReady:!!room.adminReady, workStreakLimit:WORK_STREAK_LIMIT,
     market: (room.market||[]).map(c=>({type:c.type,name:CARD_DEFS[c.type].name,icon:CARD_DEFS[c.type].icon,desc:CARD_DEFS[c.type].desc,price:PRICES[c.type]||2,bossOnly:c.type==='overtime'})),
     bossPattern: room.bossPattern ? { key:room.bossPattern, name:BOSS_PATTERNS[room.bossPattern].name, hint:BOSS_PATTERNS[room.bossPattern].hint } : null,
     supervisorName: room.supervisorId ? (room.players.get(room.supervisorId)||{}).name : null,
     you: me ? {
       id:me.id, name:me.name, role:me.role, seniority:me.seniority, alive:me.alive, isGhost:me.isGhost,
       slackCount:me.slackCount, anxiety:me.anxiety, points:me.points, lastZone:me.lastZone, immunity:me.immunity,
+      workStreak:me.workStreak||0,
       isSupervisor:me.isSupervisor, supTermLeft:me.supTermLeft, helpCooldown:me.helpCooldown, canBeFired:me.canBeFired,
       task: me.task ? {name:me.task.name,progress:me.task.progress,need:me.task.need,deadlineLeft:me.task.deadlineLeft,state:me.task.state} : null,
       submitted: me.role==='boss' ? room.choices.boss!=null : (room.choices.emp[me.id]!=null),
       isHost: me.id===room.hostId,
       hand: me.hand.map(c=>({type:c.type, name:c.name, icon:CARD_DEFS[c.type].icon, kind:CARD_DEFS[c.type].kind, desc:CARD_DEFS[c.type].desc})),
+      drawnThisRound:me._drawnRound===room.round,
+      drawCount:Math.min(room.round===1?START_HAND:1,HAND_LIMIT-me.hand.length,room.cardDeck.length),
+      roundDraw:(me._drawnRound===room.round?me.roundDraw||[]:[]).map(c=>({type:c.type,name:c.name,...CARD_DEFS[c.type],name:c.name})),
       budget: me.budget||0, bought: me._boughtRound===room.round, breathed: me._breathedRound===room.round,
       overtime: me._otRound===room.round,
       ghostCooldown: me.ghostCooldown,
@@ -179,7 +191,7 @@ function viewFor(room, pid){
       bossFires: room.bossFires,
       supervisorName: room.supervisorId ? (room.players.get(room.supervisorId)||{}).name : null,
     } : null,
-    reveal: room.phase==='reveal' ? room.lastReveal : null,
+    reveal: (room.phase==='reveal'||room.phase==='ended') ? room.lastReveal : null,
     winner: room.winner||null, log: room.log.slice(-14), zoneStreak: room.zoneStreak,
   };
 }
@@ -205,10 +217,9 @@ function startGame(room, opts){
     p.seniority=p.role==='emp'?(seniorSet.has(p.id)?'senior':'junior'):null;
     p.alive=true; p.isGhost=false; p.slackCount=0; p.points=0; p.anxiety=0; p.lastZone=null; p.task=null;
     p.immunity=(p.seniority==='senior')?1:0; p.isSupervisor=false; p.supTermLeft=0; p.helpCooldown=0; p.canBeFired=false;
-    p.hand=[]; p.ghostCooldown=0; p.otCount=0;
+    p.hand=[]; p._drawnRound=0; p.roundDraw=[]; p.workStreak=0; p.ghostCooldown=0; p.otCount=0;
   }
   room.cardDeck=shuffle(buildCardDeck());
-  for(let i=0;i<START_HAND;i++) for(const p of room.players.values()) if(p.role==='emp') drawCard(room,p);
   // 補給市場（三張河道）＋老闆部門經費
   room.marketDeck=shuffle(buildMarketDeck()); room.market=[]; refillMarket(room);
   for(const p of room.players.values()){ p.budget=(p.id===bossId)?BOSS_START_BUDGET:0; p._boughtRound=0; p._breathedRound=0; p._otRound=0; }
@@ -229,7 +240,8 @@ function startGame(room, opts){
 }
 
 function enterAdmin(room){
-  room.phase='admin'; room.choices={emp:{},boss:null,ghost:{}};
+  room.phase='admin'; room.adminReady=false; room.choices={emp:{},boss:null,ghost:{}};
+  for(const p of room.players.values()) if(p.isBot) drawRoundHand(room,p);
   const b=bossOf(room);
   // 真人老闆沒有任何行政事項可辦 → 直接開工，省掉全員枯等
   if(b&&!b.isBot){
@@ -242,13 +254,16 @@ function enterAdmin(room){
     }
   }
   log(room, `— 第 ${room.round} 回合：老闆行政（派工作／升職／資遣）—`);
-  startTimer(room, ADMIN_SEC, ()=>{ enterChoose(room); broadcast(room); });
+  if(room.solo) clearTimer(room);
+  else startTimer(room, ADMIN_SEC, ()=>{ enterChoose(room); broadcast(room); });
   if(b&&b.isBot) scheduleBotAdmin(room);
   scheduleBotEconomy(room);
 }
 function enterChoose(room){
+  for(const p of room.players.values()) drawRoundHand(room,p);
   room.phase='choosing'; room.choices={emp:{},boss:null,ghost:{}};
-  startTimer(room, CHOOSE_SEC, ()=>{
+  if(room.solo) clearTimer(room);
+  else startTimer(room, CHOOSE_SEC, ()=>{
     for(const e of aliveEmps(room)) if(room.choices.emp[e.id]==null) room.choices.emp[e.id]= e.isSupervisor?{action:'supervise',zone:null}:{action:'idle',zone:'office'};
     if(room.choices.boss==null) room.choices.boss={zones:[]};
     resolveRound(room); broadcast(room);
@@ -260,6 +275,7 @@ function enterChoose(room){
 function resolveRound(room){
   clearTimer(room);
   const emps=aliveEmps(room);
+  const before=new Map(emps.map(p=>[p.id,{points:p.points,anxiety:p.anxiety,taskProgress:p.task?.progress||0,item:p.hand[room.choices.emp[p.id]?.cardIdx]?.name||null}]));
   const bossZones=[...((room.choices.boss&&room.choices.boss.zones)||[])];
   const choiceOf=e=>room.choices.emp[e.id]||(e.isSupervisor?{action:'supervise',zone:null}:{action:'idle',zone:'office'});
 
@@ -325,7 +341,8 @@ function resolveRound(room){
   const results=[]; let safeCount=0;
 
   for(const e of emps){
-    const ch=choiceOf(e); const r={name:e.name, seniority:e.seniority, note:'', zone:'office'};
+    const ch=choiceOf(e); const r={playerId:e.id,name:e.name, seniority:e.seniority, note:'', zone:'office',action:ch.action,item:before.get(e.id).item};
+    e.workStreak=ch.action==='work'?(e.workStreak||0)+1:0;
     if(energyOf[e.id]) pending[e.id]-=energyOf[e.id];
     if(e.isSupervisor){
       r.zoneName='主管巡查'; r.supervisor=true; r.zone=supZone||'office';
@@ -413,6 +430,14 @@ function resolveRound(room){
   // 回合末結算心悸（可因休息而下降，floor 0）+ 出局
   for(const e of emps){
     e.anxiety+=pending[e.id]; if(e.anxiety<0) e.anxiety=0;
+    if(e.workStreak>=WORK_STREAK_LIMIT){
+      const rr=results.find(x=>x.playerId===e.id);
+      if(rr){rr.eliminated=true;rr.suddenDeath=true;rr.note+='；連續工作 3 回合，過勞猝死，轉為幽靈（免死金牌不適用）';}
+      e.alive=false;e.isGhost=true;
+      if(e.isSupervisor){e.isSupervisor=false;if(room.supervisorId===e.id)room.supervisorId=null;}
+      chron(room,{type:'eliminated',name:e.name});log(room,`👻【${e.name}】連續工作 ${WORK_STREAK_LIMIT} 回合，過勞猝死！`);
+      continue;
+    }
     if(e.anxiety>=room.config.anxietyOut){ const rr=results.find(x=>x.name===e.name); if(rr)rr.eliminated=true;
       e.alive=false; e.isGhost=true; if(e.isSupervisor){e.isSupervisor=false; if(room.supervisorId===e.id)room.supervisorId=null;}
       chron(room,{type:'eliminated',name:e.name});
@@ -426,6 +451,11 @@ function resolveRound(room){
   for(const p of room.players.values()) if(p.isGhost&&p.ghostCooldown>0) p.ghostCooldown--;
 
   // 老闆連查限制
+  for(const r of results){
+    const p=room.players.get(r.playerId), prev=before.get(r.playerId);
+    r.pointsDelta=p.points-prev.points; r.anxietyDelta=p.anxiety-prev.anxiety;
+    r.pointsAfter=p.points; r.anxietyAfter=p.anxiety;
+  }
   const ns={}; for(const z of Object.keys(ZONES)) ns[z]=bossZones.includes(z)?((room.zoneStreak[z]||0)+1):0; room.zoneStreak=ns;
 
   room.lastReveal={ round:room.round, bossZones:bossZones.map(z=>ZONES[z].name), bossZoneKeys:bossZones,
@@ -433,10 +463,9 @@ function resolveRound(room){
     rate: room.tasksIssued>0?Math.round(room.tasksDone/room.tasksIssued*100):0 };
   log(room, `第 ${room.round} 回合：老闆查 ${bossZones.map(z=>ZONES[z].name).join('、')||'（無）'}${supZone?`｜主管協查 ${ZONES[supZone].name}`:''}。完成率 ${room.lastReveal.rate}%。`);
   room.phase='reveal';
-  checkWin(room);
   if(room.phase==='reveal'){ // 未結束才排自動進下一回合
-    room.revealSkipAt = Date.now() + REVEAL_MIN_SKIP*1000;
-    startTimer(room, REVEAL_SEC, ()=>{ if(room.phase==='reveal'){ advanceRound(room); broadcast(room); } });
+    room.revealSkipAt = room.solo?Date.now():Date.now() + REVEAL_MIN_SKIP*1000;
+    if(!room.solo) startTimer(room, REVEAL_SEC, ()=>{ if(room.phase==='reveal'){ advanceRound(room); broadcast(room); } });
   }
 }
 
@@ -515,7 +544,7 @@ function endGame(room, side, reason, winnerEmpId){
   log(room, `🏁 結束：${side==='boss'?'老闆獲勝':'員工陣營獲勝'} — ${reason}`);
 }
 
-function advanceRound(room){ room.round++; enterAdmin(room); }
+function advanceRound(room){ checkWin(room); if(room.phase==='ended')return; room.round++; enterAdmin(room); }
 
 // ========== c-lite 單人模式：bot 層（只產生「選擇」，結算引擎 resolveRound 完全不動） ==========
 function mkBot(name, style){ const p=mkPlayer(newPid(), null, name); p.isBot=true; p.botStyle=style; return p; }
@@ -692,11 +721,13 @@ function scheduleBotAdmin(room){
   const round=room.round;
   setTimeout(()=>{
     if(!rooms.has(room.code)||room.phase!=='admin'||room.round!==round) return;
-    botAdmin(room); checkWin(room);
+    botAdmin(room); if(!aliveEmps(room).length)checkWin(room);
+    room.adminReady=true;
     if(room.phase!=='admin'){ broadcast(room); return; }
     // 有真人員工 → 留一段補給採購窗口（倒數顯示），沒有就直接開工
     const humanEmp=[...room.players.values()].some(p=>!p.isBot&&p.role==='emp'&&p.alive&&p.connected);
-    if(humanEmp){ startTimer(room, SHOP_SEC, ()=>{ if(room.phase==='admin'){ enterChoose(room); broadcast(room); } }); }
+    if(room.solo){clearTimer(room);}
+    else if(humanEmp){ startTimer(room, SHOP_SEC, ()=>{ if(room.phase==='admin'){ enterChoose(room); broadcast(room); } }); }
     else enterChoose(room);
     broadcast(room);
   }, rand(1000,1800));
@@ -737,6 +768,10 @@ function scheduleBots(room){
 
 function tryResolve(room){
   if(room.phase!=='choosing') return;
+  if(room.solo){
+    const human=room.players.get(room.hostId);
+    if(human?.isGhost&&!room.choices.ghost[human.id])return;
+  }
   const done=aliveEmps(room).every(e=>room.choices.emp[e.id]!=null)&&room.choices.boss!=null;
   if(done) resolveRound(room);
 }
@@ -976,6 +1011,23 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true}); broadcast(room);
   });
 
+  socket.on('drawRoundCards', (cb)=>{
+    const room=rooms.get(socket.data.roomCode), p=room?.players.get(socket.data.playerId);
+    if(!room||!p||room.phase!=='admin'||p.role!=='emp'||!p.alive) return cb?.({error:'目前不能抽牌'});
+    drawRoundHand(room,p);touch(room);cb?.({ok:true});broadcast(room);
+  });
+  socket.on('practiceGhostPass', (cb)=>{
+    const room=rooms.get(socket.data.roomCode),p=room?.players.get(socket.data.playerId);
+    if(!room?.solo||room.phase!=='choosing'||!p?.isGhost||p.id!==room.hostId)return cb?.({error:'目前不能略過幽靈行動'});
+    room.choices.ghost[p.id]={type:'pass'};touch(room);tryResolve(room);broadcast(room);cb?.({ok:true});
+  });
+  socket.on('practiceReady', (cb)=>{
+    const room=rooms.get(socket.data.roomCode), p=room?.players.get(socket.data.playerId);
+    if(!room?.solo||!p||p.id!==room.hostId||room.phase!=='admin')return cb?.({error:'目前不能開始選牌'});
+    if(!room.adminReady)return cb?.({error:'老闆正在準備，請稍候'});
+    if(p.alive&&p.role==='emp'&&p._drawnRound!==room.round)return cb?.({error:'先抽取本回合手牌'});
+    touch(room);enterChoose(room);broadcast(room);cb?.({ok:true});
+  });
   socket.on('beginRound', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
     const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能開始本回合'});
@@ -997,7 +1049,7 @@ io.on('connection', (socket)=>{
         if(!t||t.role!=='emp'||!t.alive) return cb&&cb({error:'報信對象無效'});
       }
       room.choices.ghost[me.id]={type:ga.type, targetId:ga.targetId||null};
-      cb&&cb({ok:true}); broadcast(room); return;
+      cb&&cb({ok:true}); tryResolve(room); broadcast(room); return;
     }
     if(me.role==='boss'){
       const picks=(payload.zones||[]).filter(z=>ZONES[z]&&z!=='office');
