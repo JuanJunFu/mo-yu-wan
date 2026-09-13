@@ -42,6 +42,13 @@
   .zone.safe{border-color:var(--green)} .zone.work{border-color:var(--blue)}
   .zone.sel{outline:3px solid var(--goldL);background:#fdf3d0}
   .zone .ic{font-size:1.3rem}.zone .nm{font-weight:800}.zone .m{font-size:.74rem;color:var(--muted)}
+  /* ⚠️ 還沒選行動牌時的送出鈕（focus.js paintPreview 掛 .needs-pick）：文案改成「⬆ 先選上面的行動牌」，
+     這裡把它降一階視覺重量——它是指路，不是本回合的主要動作；但仍可按（按了會閃行動牌區＋出提示），
+     絕不留「按了完全沒反應」的死點擊。#empsubmit.needs-pick 才蓋得過 focus.css:7 的 .focus-game .play-footer>button。
+     色碼寫死的理由同下面 line 68 那段。字 #fff8e5 配這兩個色階實測 4.69:1／6.55:1（14px 粗體要 4.5:1 才算 AA）。 */
+  #empsubmit.needs-pick{background:linear-gradient(180deg,#7a6f52,#63593c);border-color:#4f472f}
+  #empzones.nudge{border-radius:12px;animation:pickNudge .6s ease-in-out 2}
+  @keyframes pickNudge{0%,100%{background-color:rgba(217,165,32,0)}45%{background-color:rgba(217,165,32,.32)}}
   .me{display:flex;gap:12px;flex-wrap:wrap;font-size:.88rem;margin:2px 0;color:var(--muted);align-items:center}
   .me b{color:var(--ink)}
   .status{text-align:center;color:var(--gold);font-weight:900;margin:4px 0;font-size:1.1rem}
@@ -53,10 +60,30 @@
   .mcard.mboss{border-color:var(--red);background:linear-gradient(180deg,#f8ecdc,#f0dcc4)}
   .mcard .mi{font-size:1.4rem}.mcard .mn{font-weight:800;font-size:.85rem}.mcard .md{font-size:.68rem;color:var(--muted);min-height:2.2em;line-height:1.25}
   .mcard button{margin-top:5px;padding:7px 4px;font-size:.85rem}
+  .mcard .mk{font-size:.63rem;font-weight:800;letter-spacing:1px;border-radius:99px;padding:1px 7px;display:inline-block;border:1px solid currentColor}
+  .mcard .mw{font-size:.62rem;color:#6d5336;line-height:1.35;margin-top:3px}
+  .mc-excuse{border-color:#3f6733}.mc-excuse .mk{color:#3f6733}
+  .mc-jam{border-color:#3c5f80}.mc-jam .mk{color:#3c5f80}
+  .mc-buff{border-color:#c08f2c}.mc-buff .mk{color:#96690a}
+  .mc-social{border-color:#63508a}.mc-social .mk{color:#63508a}
   /* 加班/深呼吸 橫幅 */
   .otbar{border:2px solid var(--red);background:#f8e8dc;border-radius:8px;padding:8px 10px;margin:7px 0;font-size:.88rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .otbar button{width:auto;margin:0;padding:8px 12px;font-size:.85rem;flex:0 0 auto}
   .otbar.calm{border-color:var(--green);background:#edf3e7}
+  /* ⚠ 過勞警告：提交前的顯眼位置。除了「再工作就猝死」，一定要同時列出當下合法的替代方案，
+     否則玩家只知道不能做什麼、不知道能做什麼（C3）。 */
+  /* ⚠️ 這一段刻意不用 var()：cards.css 的 :root 會把 --wood2/--gold/--kraft 換成另一組（偏亮）的值，
+     用 token 會變成淺字配淺底＝看不見。新加的元素一律寫死色碼，避免四層疊加時被靜默改色。 */
+  .karoshi-warn{border:2px solid #a83226;background:linear-gradient(180deg,#fbe4d6,#f5d1bc);border-radius:10px;padding:9px 12px;margin:7px 0;box-shadow:0 0 0 3px rgba(168,50,38,.13)}
+  .karoshi-warn .kw-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-weight:900;color:#8d2a1e;font-size:.95rem}
+  .karoshi-warn .kw-head small{font-weight:400;color:#6d5336;font-size:.74rem}
+  .karoshi-warn .kw-out{font-size:.76rem;color:#6d5336;margin:5px 0 4px;line-height:1.5}
+  .karoshi-warn .kw-opts{display:flex;gap:6px;flex-wrap:wrap}
+  .karoshi-warn .kw-opts button{width:auto;margin:0;flex:0 0 auto;padding:6px 10px;font-size:.8rem;letter-spacing:0;background:linear-gradient(180deg,#f7eed6,#e9dab2);color:#4a2c14;border:1.5px solid #8a5a30;text-shadow:none;box-shadow:none}
+  .karoshi-warn .kw-opts button.rest{border-color:#3f6733;background:linear-gradient(180deg,#e7f1de,#d3e6c8)}
+  .karoshi-warn .kw-opts button[aria-pressed=true]{background:#3f6733;color:#fff8e5;border-color:#3f6733}
+  .karoshi-warn .kw-opts button:disabled{opacity:.6}
+  .karoshi-warn .kw-why{opacity:.78;font-weight:400}
   /* 賭命衝刺 */
   .riskbtn{background:linear-gradient(180deg,#f5ecd4,#e8d9b2);color:#7a3020;border:2px dashed var(--red);text-shadow:none;box-shadow:none;font-weight:800}
   .riskbtn.on{background:var(--red);color:#fff;border-style:solid}
@@ -81,6 +108,14 @@
   .rev{border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:6px 0;background:var(--strip)}
   .rev.caught{border-color:var(--red)} .rev.ok{border-color:var(--green)} .rev.out{opacity:.55}
   .banner{text-align:center;font-size:1.4rem;font-weight:900;color:var(--wood2);margin:10px 0;letter-spacing:2px}
+  /* 🏆 結算橫幅：.banner 吃 var(--wood2)，但 cards.css:2 的 :root 把 --wood2 換成淺奶油 #ece3c8，
+     配 .card 的底 #f4eddc 實測只有 1.10:1 —— 全局最該被看到的一行幾乎讀不出來。
+     依 line 68 的規矩改寫死色碼（別再吃 token），並補一塊童話木框羊皮紙牌面（語彙沿用 .task／.kcard.lead）。
+     只掛 #endbanner：.banner 這個 class 目前全站只有 index.html:371 這一個節點在用（已 grep），
+     用 #s-end #endbanner 提高特異性，才蓋得過 screen.css:16 的 `#s-end .banner`。 */
+  #s-end #endbanner{color:#4a2c14;background:linear-gradient(180deg,#fdf3cf,#f3e2b0);border:2px solid #8a5a30;border-radius:10px;
+    padding:9px 14px;text-shadow:0 1px 0 #fff8e0;
+    box-shadow:inset 0 0 0 2px #fff6dc,inset 0 0 22px rgba(217,165,32,.22),0 2px 6px rgba(74,44,20,.25)}
   .theend{text-align:center;letter-spacing:6px;color:var(--muted);font-size:.85rem;margin:2px 0 6px}
   .theend::before,.theend::after{content:' ── ';color:var(--line)}
   /* 終局故事書：逐段淡入的童話小說 */
@@ -97,6 +132,23 @@
   .ritem .comp{font-family:ui-monospace,Consolas,monospace;font-weight:900;font-size:1.3rem;color:var(--gold);flex:0 0 auto}
   .bosscard{display:flex;align-items:center;gap:10px;border:1.5px solid var(--red);border-radius:8px;padding:10px 14px;margin:8px 0;background:#f8e8dc}
   .bosscard .info{flex:1}.bosscard .nm{font-weight:800}
+  /* 三王頒獎：🐟 摸魚王＝唯一的「贏」（主線，放大＋金框）；👻 搞鬼王／🐮 牛馬王＝頭銜不是勝利（並排、降一階） */
+  .kings{margin:10px 0 4px}
+  .kings-label{color:#8a5a30;font-weight:800;margin:0 0 6px}
+  .kcard{display:flex;gap:10px;align-items:flex-start;border:1px solid #cdbb95;border-radius:10px;padding:9px 12px;background:#faf1da}
+  .kcard.lead{border:2.5px solid #d9a520;background:linear-gradient(180deg,#fdf3cf,#f7e6ae);box-shadow:inset 0 0 22px rgba(217,165,32,.22);margin-bottom:6px}
+  .kcard .kmedal{font-size:1.8rem;line-height:1.2;flex:0 0 auto}
+  .kcard.lead .kmedal{font-size:2.6rem}
+  .kcard .kbody{flex:1;min-width:0}
+  .kcard .ktitle{font-weight:900;color:#8a5a30;font-size:.9rem}
+  .kcard.lead .ktitle{font-size:1.1rem;color:#4a2c14}
+  .kcard .ksub{font-weight:400;font-size:.68rem;color:#8a7355;margin-left:6px;white-space:nowrap}
+  .kcard .kholder{font-weight:900;font-size:1rem;color:#3a2a18;line-height:1.3}
+  .kcard.lead .kholder{font-size:1.3rem;color:#96690a}
+  .kcard .kdeed{font-size:.8rem;line-height:1.6;color:#6d5336;margin-top:2px}
+  .kcard.vacant{opacity:.8;border-style:dashed}
+  .kcard.vacant .kholder{color:#8a7355;font-size:.95rem}
+  .kings-honor{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px}
   .hint{font-size:.8rem;color:var(--muted);text-align:center;margin-top:8px}
   .rules{background:var(--paper);border:3px solid var(--wood);border-radius:6px;padding:0 16px;margin:14px 0;box-shadow:0 2px 10px rgba(74,44,20,.28),inset 0 0 0 1px #cdb27e}
   .rules summary{cursor:pointer;font-weight:800;color:var(--kraft);padding:14px 0;font-size:1.05rem;list-style:none}
@@ -203,8 +255,12 @@
       <ul class="plist" id="roomlist"><li style="color:var(--muted)">載入中…</li></ul>
       <button class="ghost" onclick="refreshRooms()">🔄 重新整理</button>
     </div>
-    <div class="hint" style="font-size:.95rem;color:var(--wood2);font-weight:800">「你是牛馬，還是摸魚王？」</div>
-    <div class="hint">3～6 人。老闆派工作、員工邊做邊摸。撐到下班、偷懶點數 💰 最高的當摸魚王；愛加班的小心變過勞牛馬 🐂。</div>
+    <!-- 樣式改由 focus.css 的 .home-slogan／.home-blurb 負責。
+         原本這裡寫死 color:var(--wood2)，但 cards.css:2 反向重定義了 :root，
+         --wood2 在執行時是 #ece3c8（淺奶油）→ 淺字配淺底等於隱形。行內樣式又壓得過所有選擇器，
+         所以直接把行內色拿掉，不要留一個之後誰都蓋不掉的陷阱。 -->
+    <div class="hint home-slogan">「你是牛馬，還是摸魚王？」</div>
+    <div class="hint home-blurb">3～6 人。老闆派工作、員工偷閒；摸魚時手上若有任務，還會順便推一點進度。撐到下班、偷懶點數 💰 最高的當摸魚王；愛加班的小心變過勞牛馬 🐂。</div>
     <div id="rules-home"></div>
   </div>
 
@@ -293,9 +349,15 @@
 
       <!-- 揭曉（動畫過場） -->
       <div id="reveal" class="hide">
-        <div style="display:flex;justify-content:space-between;align-items:center">
+        <!-- 演出抬頭：kicker（#revtitle）＋跳過鈕在同一列，旁白（#actnarr）在它們下面自成一列。
+             版面走 focus.css 的 .rev-head（grid）。⚠️ #actnarr 一定要跟 #revtitle 同一個父層——
+             focus.js 是用 $('revtitle').parentElement 把整個抬頭搬進 .reveal-board-pane 的，
+             放到別的容器會被留在外面。旁白掛在抬頭上還有一個作用：手機一屏放不下時，
+             會縮的是跑馬燈與戰果條，旁白（「老闆走進哪裡」）永遠在。 -->
+        <div class="rev-head">
           <h2 id="revtitle" style="margin:0"></h2>
-          <button class="ghost" onclick="skipReveal()" style="width:auto;margin:0;padding:5px 12px;font-size:.8rem">⏩ 跳過動畫</button>
+          <button class="ghost" id="skiprev" onclick="skipReveal()" style="width:auto;margin:0;padding:5px 12px;font-size:.8rem">⏩ 跳過演出，直接看結果</button>
+          <p class="act-narr" id="actnarr" aria-live="polite"></p>
         </div>
         <div id="revtoasts"></div>
         <div class="board" id="revboard"></div>
@@ -323,6 +385,7 @@
       <div class="theend">📖 THE END</div>
       <div class="banner" id="endbanner"></div>
       <div class="hint" id="endreason"></div>
+      <div id="endkings"></div>
       <div id="endstory"></div>
       <div class="hint" id="endrate"></div>
       <ul class="plist" id="ranking"></ul>
@@ -384,7 +447,8 @@ function renderMarket(){
     +m.map((c,i)=>{
       const afford=you.points>=c.price&&(you.hand||[]).length<3;
       const dis=!you.alive||you.bought||afford===false;
-      return `<div class="mcard"><div class="mi">${c.icon}</div><div class="mn">${esc(c.name)}</div><div class="md">${esc(c.desc)}</div><button ${dis?'disabled':''} onclick="buyCard(${i})">${c.price} 💰</button></div>`;
+      const k=cardClass(c.type);   // 市場與手牌用同一套四類標示，買之前就看得懂它是哪一類
+      return `<div class="mcard mc-${k.cls}"><div class="mk">${k.badge} ${k.label}</div><div class="mi">${c.icon}</div><div class="mn">${esc(c.name)}</div><div class="md">${esc(c.desc)}</div><div class="mw">🕒 ${esc(k.when)}</div><button ${dis?'disabled':''} onclick="buyCard(${i})">${c.price} 💰</button></div>`;
     }).join('')+'</div>';
 }
 function renderEcon(){
@@ -392,8 +456,34 @@ function renderEcon(){
   if(you&&you.role==='emp'&&you.alive&&(ST.phase==='admin'||ST.phase==='choosing')){
     if(you.overtime) h+=`<div class="otbar">🕘 <b>老闆要求你加班！</b>本回合不能摸魚（認真做＝加班費+2💰、過勞+1💓）<button onclick="refuseOT()" ${you.points>=3?'':'disabled'}>付 3💰 請假開溜</button></div>`;
     if(!you.breathed&&you.anxiety>=ST.anxietyOut-2) h+=`<div class="otbar calm">😮‍💨 心悸快爆了！<button onclick="breathe()" ${you.points>=3?'':'disabled'}>花 3💰 深呼吸（💓−1）</button></div>`;
+    h+=overworkWarning();
   }
   $('econbox').innerHTML=h;
+}
+// 過勞警告：站在「提交前」的橫幅位置（和加班令同一條帶），不是只有工作卡自己的小字。
+// C3 的硬規定——只列伺服器當下真的會收的行動：
+//   · idle 休息永遠合法，加班令下也合法（server.js:1083 那條分支沒有任何 _otRound 檢查）→ 一律列出
+//   · slack 摸魚要先過加班令（server.js:1085）與 lastZone 冷卻（server.js:1088）才列
+//   · ❌ 不得出現「邊做邊摸」：它是「摸魚 + 手上有任務」的附帶效果（server.js:414），不是一個可選動作
+function overworkWarning(){
+  const you=ST.you, lim=ST.workStreakLimit||3, streak=you.workStreak||0;
+  if(you.isSupervisor||streak<lim-1) return '';
+  const opts=[{k:'idle',label:'🌿 回座休息',why:'心悸 −1 · 絕不會被抓',cls:'rest',pick:"pickEmp('idle')"}];
+  if(!you.overtime) for(const k of ST.slackZones){
+    if(you.lastZone===k) continue;            // 上回合待過＝伺服器會擋，不能叫玩家去點
+    const z=ST.zones[k];
+    const gain=Math.max(0,z.slack+(you.seniority==='senior'?-1:1)); // 與行動卡同一條公式，數字不能對不上
+    opts.push({k,label:`${ZI[k]||'🏢'} 去${esc(z.name)}摸魚`,why:`成功 +${gain} 分 · 💓+${z.anxiety}`,cls:'',pick:`pickEmp('slack','${k}')`});
+  }
+  const picked=a=>!!empPick&&(a==='idle'?empPick.action==='idle':empPick.action==='slack'&&empPick.zone===a);
+  const live=ST.phase==='choosing';
+  return '<div class="karoshi-warn">'
+    +`<div class="kw-head">💀 再按一次「埋頭苦幹」就過勞猝死<small>已連續工作 ${streak}/${lim} 回合 · 免死金牌擋不住</small></div>`
+    +`<div class="kw-out">改做下面任一項，連續工作立刻歸零${you.overtime?'。🕘 <b>加班令只禁摸魚，休息照樣送得出去</b>':''}：</div>`
+    +'<div class="kw-opts">'+opts.map(o=>live
+        ? `<button type="button" class="${o.cls}" aria-pressed="${picked(o.k)}" onclick="${o.pick}">${o.label}<span class="kw-why"> · ${o.why}</span></button>`
+        : `<button type="button" class="${o.cls}" disabled>${o.label}<span class="kw-why"> · ${o.why}</span></button>`).join('')
+    +'</div>'+(live?'':'<div class="kw-out">（等一下進到選行動牌，這裡就能直接點）</div>')+'</div>';
 }
 function renderBossOT(){
   const you=ST.you; const n=(you.hand||[]).filter(c=>c.type==='overtime').length;
@@ -493,6 +583,18 @@ function ghostAct(type,targetId){ghostMode=null;sock.emit('submitChoice',{ghostA
 function ghostWarnMenu(){ghostMode=ghostMode==='warn'?null:'warn';renderGhost();}
 function toggleCard(i){selCard=(selCard===i)?null:i;renderEmpZones();}
 const ZI={office:'🏢',tea:'☕',copy:'🖨️',toilet:'🚻',roof:'🪟'};
+// 四類手牌（老闆 2026-09-13 裁定）：藉口／干擾／增益／社交，對應 server.js:61 PRICES 的卡種。
+// when＝使用時機（卡面四要素之一）。藉口是被動擋箭牌：server.js:1075 只收 kind==='item'，
+// 所以它「不能」被主動打出，卡面必須講死，不然玩家會一直去點它。
+const CARD_CLASS={
+  excuse:  {cls:'excuse',label:'藉口',badge:'🛡️',when:'被抓時自動觸發，不用也不能主動出',auto:true},
+  jam:     {cls:'jam',   label:'干擾',badge:'🌀',when:'選行動牌時搭配，干擾老闆巡查'},
+  energy:  {cls:'buff',  label:'增益',badge:'✨',when:'選行動牌時搭配，強化自己'},
+  boost:   {cls:'buff',  label:'增益',badge:'✨',when:'選行動牌時搭配，強化自己'},
+  mooch:   {cls:'social',label:'社交',badge:'🤝',when:'搭配出牌，並指定 1 位隊友',target:true},
+  overtime:{cls:'boss',  label:'老闆',badge:'👔',when:'行政階段指定 1 名員工'},
+};
+function cardClass(t){return CARD_CLASS[t]||{cls:'buff',label:'道具',badge:'🎴',when:'選行動牌時搭配'};}
 
 sock.on('state',s=>{ST=s;render();});
 
@@ -597,7 +699,7 @@ function renderPromoteFire(){
   if(a.supervisorName) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#6a4a8a;margin:8px 0 2px">主管：${esc(a.supervisorName)}（任期中）</div>`;
   else if(a.canPromote&&a.promotable.length) $('promotebox').innerHTML=`<div style="font-size:.82rem;color:#6a4a8a;margin:8px 0 2px">升職令（升為主管：不能摸魚、免疫被抓、可協查抓人 +2）</div><ul class="plist">`+a.promotable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:#a06ea0;color:#fff" onclick="sock.emit('promote',{targetId:'${p.id}'})">升職</button></li>`).join('')+`</ul>`;
   else $('promotebox').innerHTML=`<div class="hint" style="text-align:left">升職令冷卻中</div>`;
-  if(a.fireable.length&&a.bossFires>0) $('firebox').innerHTML=`<div style="font-size:.82rem;color:#a83226;margin:8px 0 2px">資遣（剩 ${a.bossFires} 次；限有逾期紀錄者）</div><ul class="plist">`+a.fireable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:var(--red);color:#fff" onclick="if(confirm('確定資遣 ${esc(p.name)}？'))sock.emit('fire',{targetId:'${p.id}'})">資遣</button></li>`).join('')+`</ul>`;
+  if(a.fireable.length&&a.bossFires>0) $('firebox').innerHTML=`<div style="font-size:.82rem;color:#a83226;margin:8px 0 2px">資遣（剩 ${a.bossFires} 次；限有逾期紀錄者）</div><ul class="plist">`+a.fireable.map(p=>`<li><span>${esc(p.name)}</span><button style="width:auto;margin:0;padding:6px 12px;background:var(--red);color:#fff" data-fname="${esc(p.name)}" onclick="if(confirm('確定資遣 '+this.dataset.fname+'？'))sock.emit('fire',{targetId:'${p.id}'})">資遣</button></li>`).join('')+`</ul>`;
   else $('firebox').innerHTML='';
 }
 function renderSupZones(){
@@ -691,7 +793,7 @@ function renderBossZones(){
   $('bossfocus').innerHTML=fh;
 }
 function pickBoss(k){const i=bossPicks.indexOf(k);if(i>=0)bossPicks.splice(i,1);else{if(bossPicks.length>=ST.bossInspect)bossPicks.shift();bossPicks.push(k);}renderBossZones();}
-let revAnimKey=null, revTimers=[];
+let revAnimKey=null, revTimers=[], revAnimEndsAt=0; // revAnimEndsAt：演出何時播完（focus.js 用來接「演出→個人總結」）
 function rvT(fn,ms){revTimers.push(setTimeout(fn,ms));}
 function renderReveal(){
   bossPicks=[]; supPick=null; helpTarget=null; selCard=null; ghostMode=null; empPick=null; riskyOn=false; holdSel=0; focusPct=0; focusZone=null; moochTarget=null;
@@ -731,7 +833,9 @@ function playReveal(r,instant){
   const zoneOrder=['office',...ST.slackZones];
   $('revboard').innerHTML=zoneOrder.map(k=>{const z=ST.zones[k];
     return `<div class="bzone ${k==='office'?'office':''}" id="rz_${k}"><span class="bt">${ZI[k]} ${z.name}</span><span class="stamp" id="st_${k}"></span><div class="chips" id="ch_${k}"></div></div>`;}).join('');
-  $('revtoasts').innerHTML=''; $('revsum').innerHTML='';
+  // .act-narr＝演出階段的旁白（wave3 §5.3）。t=0 先清空，位子由 CSS 的 min-height 佔著，
+  // 手電筒落下那一拍才填字（見第 ④ 步），這樣填字時不會 layout shift。
+  $('revtoasts').innerHTML=''; $('revsum').innerHTML=''; $('actnarr').textContent='';
   // ② 員工滑入各區
   r.results.forEach((x,i)=>{
     const zk=(x.zone&&ST.zones[x.zone])?x.zone:'office';
@@ -752,6 +856,12 @@ function playReveal(r,instant){
   });
   t+=(r.ghostNotes||[]).length*350+300;
   // ④ 老闆手電筒＋主管蓋章
+  // 旁白：手電筒落下的同一拍，用畫面上最大的字講出「老闆走進哪裡」。
+  // r.bossZones／r.supZone 本來就已經印在 #revsum 與 #revlist 兩處，這裡只是搬到主角位——
+  // 零新增 server 欄位、零規則變動。🔴 t／D()／rvT 常數／revAnimEndsAt 一律沒動，
+  // 所以 server.js revealAnimMs(rv) 的鏡像關係（task.md C4）不受影響。
+  const narr=(r.bossZones||[]).length?`🔦 老闆走進 ${r.bossZones.join('、')}`:'🔦 老闆今天沒出巡';
+  rvT(()=>{const nd=$('actnarr');if(nd)nd.textContent=narr+(r.supZone?`　｜🕵️ 主管去了 ${r.supZone}`:'');},D(t));
   (r.bossZoneKeys||[]).forEach(k=>{rvT(()=>{const z=$('rz_'+k),s=$('st_'+k);if(z)z.classList.add('inspected');if(s){s.textContent='🔦';s.classList.add('in');}},D(t));});
   if(r.supZoneKey){rvT(()=>{const z=$('rz_'+r.supZoneKey),s=$('st_'+r.supZoneKey);if(z)z.classList.add('inspected');if(s){s.textContent=(s.textContent||'')+'🕵️';s.classList.add('in');}},D(t+250));}
   t+=1100;
@@ -783,12 +893,33 @@ function playReveal(r,instant){
       return `<div class="sumline" id="sl_${i}"><span class="sn">${x.supervisor?'🕵️':(x.seniority==='senior'?'🦉':'🐣')} ${esc(x.name)}</span><span style="color:var(--muted)">${ZI[x.zone]||'🏢'}</span><span class="si ${color}">${txt}</span></div>`;}).join('');
     r.results.forEach((x,i)=>rvT(()=>{const s=$('sl_'+i);if(s)s.classList.add('in');},D(i*120)));
   },D(t));
+  // 演出總長＝最後一條總結淡入完的時間；跳過時立即到期（focus.js 依此切到個人總結）
+  revAnimEndsAt=instant?Date.now():Date.now()+t+n*120+1200; // 尾巴留 1.2 秒讓人看完戰果總結再切個人總結
+}
+// 三王：資料是 server 的 winner.kings（固定三筆，各帶 title／holder／deed；從缺時 vacant:true 也有一句話）。
+// 視覺層級照老闆裁定：🐟 摸魚王＝唯一的「贏」（主線，金框放大）；👻 搞鬼王／🐮 牛馬王＝頭銜不是勝利（並排降階）。
+function kingCard(k,lead){
+  if(!k) return '';
+  const vacant=!!k.vacant||!k.holder;
+  return `<div class="kcard ${lead?'lead':'honor'}${vacant?' vacant':''}">`
+    +`<div class="kmedal" aria-hidden="true">${k.icon||'👑'}</div>`
+    +`<div class="kbody"><div class="ktitle">${esc(k.title||'')}<span class="ksub">${esc(k.sub||'')}</span></div>`
+    +`<div class="kholder">${vacant?'從缺':esc(k.holder)}</div>`
+    +`<div class="kdeed">${esc(k.deed||'')}</div></div></div>`;
+}
+function kingsMarkup(kings){
+  if(!kings||!kings.length) return '';
+  const lead=kings.find(k=>k.kind==='win')||kings[0];
+  return '<div class="kings"><div class="kings-label">👑 本日頒獎</div>'
+    +kingCard(lead,true)
+    +'<div class="kings-honor">'+kings.filter(k=>k!==lead).map(k=>kingCard(k,false)).join('')+'</div></div>';
 }
 function renderEnd(){
   const w=ST.winner;
   const ea=$('art-end-img');if(ea){const want='art/'+(w.side==='boss'?'09_boss_end.jpg':'10_king_end.jpg');if(!ea.src.endsWith(want))ea.src=want;}
   $('endbanner').textContent=w.side==='boss'?'👔 老闆獲勝！':'🏆 員工陣營獲勝！';
   $('endreason').textContent=w.reason;
+  $('endkings').innerHTML=kingsMarkup(w.kings);
   $('endstory').innerHTML=(w.story&&w.story.length)
     ? '<div class="storybox">'+w.story.map((p,i)=>`<p style="animation-delay:${(i*0.7).toFixed(1)}s">${esc(p)}</p>`).join('')+'</div>' : '';
   const b=w.boss||{};
@@ -804,7 +935,12 @@ function renderEnd(){
     </div>`).join('');
   $('hostend').classList.toggle('hide',!(ST.you&&ST.you.isHost));
 }
-function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+// 引號也要跳脫：esc() 的輸出會進到屬性值（例如下面資遣按鈕的 data-fname），
+// 只擋 &<> 的話一個 " 就能跳出屬性、再補一個 onmouseover=… 進來。
+// ⚠️ 實體編碼**救不了 inline handler**：瀏覽器會先把屬性值 HTML 解碼、再交給 JS parser，
+//    所以 &#39; 在 onclick 裡還是會變回真正的單引號。名字絕對不能出現在 onclick 的程式碼字串裡
+//    （見 renderPromoteFire 的資遣按鈕：走 data-* + this.dataset，不是字串串接）。
+function esc(s){return (s||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 
 const RULES_BODY=`
 <h4>🎯 你在玩什麼</h4>
@@ -818,9 +954,13 @@ const RULES_BODY=`
 <h4>🧑‍🤝‍🧑 老鳥 / 菜鳥</h4>
 <p>🐣 菜鳥：摸魚 +1 分，但老闆巡到<b>隔壁區也會抓到你</b>。🦉 老鳥：摸魚 −1 分，但有一張<b>免死金牌</b>、要被連盯兩回合才抓得到。</p>
 <h4>📋 工作（做工有薪水，不可以白嫖）</h4>
-<p>認真做＝<b>薪水 +1💰</b>、心悸 −1（有任務再 +2 進度）｜ 邊做邊摸（+1 進度、有分但被抓算怠工）｜ 擺爛（易逾期）。做完任務額外 +1💰。<b>唯一例外：被同事用 🙏凹同事卡凹到</b>——你認真做，薪水進他口袋，白做工。</p>
-<h4>🃏 手牌（開局發 2 張，完成任務再抽）</h4>
-<p>🗣️ <b>藉口卡</b>：被抓時自動使用，這次不算也不加心悸。道具卡要在選動作前點選：🧃提神飲料（心悸 −2）｜🖨️影印機卡紙（老闆少巡一區）｜💪雞精加持（摸魚成功 +2 分）。</p>
+<p>每回合就是那三張行動牌：<b>💼 認真做</b>＝薪水 +1💰、心悸 −1（有任務再 +2 進度）｜<b>🌿 回座休息</b>＝心悸 −1、不會被抓（不加分）｜<b>去某區摸魚</b>＝賺 💰 但心悸上升。<br><b>「邊做邊摸」不是第四個按鈕</b>：那是<b>摸魚</b>的附帶效果——摸魚時手上若有任務，會順便推 <b>+1 進度</b>（被抓就不算，還算你怠工）。完全不碰任務＝擺爛，容易逾期。做完任務額外 +1💰。<b>唯一例外：被同事用 🙏凹同事卡凹到</b>——你認真做，薪水進他口袋，白做工。</p>
+<h4>🃏 手牌四類（開局發 2 張，完成任務再抽）</h4>
+<p>🛡️ <b>藉口</b>（🗣️藉口卡）：<b>被抓時自動觸發</b>，這次不算也不加心悸——不用點、也點不下去。<br>
+🌀 <b>干擾</b>（🖨️影印機卡紙）：老闆本回合少巡一區。<br>
+✨ <b>增益</b>（🧃提神飲料 心悸 −2｜💪雞精加持 摸魚成功 +2 分）：強化你自己。<br>
+🤝 <b>社交</b>（🙏凹同事）：要<b>指定 1 位隊友</b>，他這回合認真做的話薪水歸你。<br>
+干擾／增益／社交都是<b>選行動牌時搭配打出</b>，一回合最多 1 張。</p>
 <h4>👻 出局變幽靈（不是坐板凳）</h4>
 <p>出局後每 2 回合可作祟一次：<b>騷擾老闆</b>（隨機少巡一區）｜<b>打斷協查</b>（主管白跑）｜<b>通風報信</b>（救一位快被抓的同事）。</p>
 <h4>🛒 補給市場＆經濟（老闆行政時開市）</h4>

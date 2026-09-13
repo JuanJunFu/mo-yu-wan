@@ -133,8 +133,8 @@ reveal.append($('nextbtn'), $('waitnext'));
 reveal.querySelector('details').classList.add('pane-off');
 readerButton(reveal.querySelector('.screen-tabs'), '詳細結算', () => $('revlist').textContent);
 
-// Secondary screens: remove decorative art and open verbose content on demand.
-['art-lobby', 'art-end', 'rules-lobby'].forEach(id => $(id)?.classList.add('pane-off'));
+// Secondary screens: keep the storybook art visible (T4); still open verbose rules text on demand.
+['rules-lobby'].forEach(id => $(id)?.classList.add('pane-off'));
 const endTools = screenNode('div', 'screen-tools', $('s-end'));
 readerButton(endTools, '本局故事', () => $('endstory').textContent);
 $('endstory').classList.add('pane-off');
