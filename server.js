@@ -23,6 +23,16 @@ const ZONES = {
 };
 const SLACK_ZONES = ['tea', 'copy', 'toilet', 'roof'];
 const ADJ = { office:['copy'], copy:['office','tea'], tea:['copy','toilet'], toilet:['tea','roof'], roof:['toilet'] };
+// 🔴 2026-09-13 Codex 輪次 3 B3-A／B3-B（HEAD 就有的缺陷，老闆裁決本批一起修）：
+//    客戶端送 key 進來查表**一律**要走這裡，不能直接靠 `table[k]` 的真假值判斷，因為
+//    ① 隱式轉字串：`ZONES[['tea']]`／`ZONES[Buffer('tea')]` 都拿得到茶水間 → 驗證過關，
+//       但**原本的陣列／Buffer 被原樣存進 room.choices**，結算時 `inspected.has(zone)` 是嚴格比對
+//       → 老闆明明巡了那一區卻抓不到人（實測 +2💰 白拿）。
+//    ② 原型鏈：`ZONES['__proto__']` 是 Object.prototype（truthy）→ 驗證過關 →
+//       結算走到 `for(const adj of ADJ[zone])` 丟 TypeError → 整間房 phase 永遠卡在 choosing。
+//    hasOwnProperty 用 Object.prototype.call 呼叫：查的表自己不一定有這個方法。
+function hasKey(table, k){ return (typeof k==='string'||typeof k==='number') && Object.prototype.hasOwnProperty.call(table, k); }
+function isZoneKey(z){ return typeof z==='string' && Object.prototype.hasOwnProperty.call(ZONES, z); }
 const ANXIETY_OUT_DEFAULT = 6;
 const TASK_NEED = 4, TASK_DEADLINE = 3;
 const CHOOSE_SEC = 45, ADMIN_SEC = 45;
@@ -36,6 +46,7 @@ const GHOST_COOLDOWN = 2;     // 幽靈行動冷卻（每 2 回合可作祟一�
 const START_HAND = 2;         // 開局手牌
 const HAND_LIMIT = 3;         // 手牌上限
 const MAX_ROOMS = 10;               // 房間總數上限（防濫用閥；單機記憶體實際撐得更多）
+const MAX_ROUNDS = 20;              // 自訂局數上限（純輸入驗證閥；預設仍是 solo 4／多人 6，前端不送 rounds）
 const LOBBY_IDLE_MS = 30*60*1000;   // 等待中房間閒置 30 分回收
 const ENDED_IDLE_MS = 5*60*1000;    // 遊戲結束後 5 分回收
 const ABANDON_MS = 5*60*1000;       // 遊戲中全員真人離線 5 分回收（保留重連窗口）
@@ -156,6 +167,7 @@ function viewFor(room, pid){
     code:room.code, name:room.name||null, phase:room.phase, round:room.round, rounds:room.config.rounds,
     bossInspect:room.config.bossInspect, anxietyOut:room.config.anxietyOut, completeThreshold:room.config.completeThreshold,
     tasksIssued:room.tasksIssued, tasksDone:room.tasksDone, timerEndsAt:room.timerEndsAt||null, revealSkipAt:room.revealSkipAt||null,
+    revealAnimMs:room.revealAnimMs||0, // server 推算的演出時長；倒數已含這段，前端要對齊可讀它（現有前端不讀也無妨）
     zones:ZONES, slackZones:SLACK_ZONES, solo:!!room.solo, adminReady:!!room.adminReady, workStreakLimit:WORK_STREAK_LIMIT,
     market: (room.market||[]).map(c=>({type:c.type,name:CARD_DEFS[c.type].name,icon:CARD_DEFS[c.type].icon,desc:CARD_DEFS[c.type].desc,price:PRICES[c.type]||2,bossOnly:c.type==='overtime'})),
     bossPattern: room.bossPattern ? { key:room.bossPattern, name:BOSS_PATTERNS[room.bossPattern].name, hint:BOSS_PATTERNS[room.bossPattern].hint } : null,
@@ -218,16 +230,25 @@ function startGame(room, opts){
     p.alive=true; p.isGhost=false; p.slackCount=0; p.points=0; p.anxiety=0; p.lastZone=null; p.task=null;
     p.immunity=(p.seniority==='senior')?1:0; p.isSupervisor=false; p.supTermLeft=0; p.helpCooldown=0; p.canBeFired=false;
     p.hand=[]; p._drawnRound=0; p.roundDraw=[]; p.workStreak=0; p.ghostCooldown=0; p.otCount=0;
+    p.workCount=0; p.wageEarned=0; p.moochedCount=0; // 牛馬王選材計數器（終局頒獎用，不進結算）
   }
   room.cardDeck=shuffle(buildCardDeck());
   // 補給市場（三張河道）＋老闆部門經費
   room.marketDeck=shuffle(buildMarketDeck()); room.market=[]; refillMarket(room);
   for(const p of room.players.values()){ p.budget=(p.id===bossId)?BOSS_START_BUDGET:0; p._boughtRound=0; p._breathedRound=0; p._otRound=0; }
   const n=ids.length;
-  room.config.rounds=opts.rounds||(n<=3?6:8);
+  // 節奏（2026-09-13 裁決）：單人＝3 分鐘試玩入口 4 回合；多人是社交場 6 回合。只砍回合數，秒數不動。
+  // 🔴 Codex 輪次 3 B3-C：`opts.rounds||預設` 對 rounds 零驗證。實測 `{rounds:{}}` → 終局判定
+  //    （server.js `room.round>=room.config.rounds`）永遠命中不了＝這局**不會結束**；`{rounds:[]}` → 第 1 回合就結束。
+  //    只收合理範圍內的正整數，其餘一律回退到預設（前端從來不送 rounds，只有測試／自訂客戶端會送）。
+  const wantRounds=Number.isInteger(opts.rounds)?opts.rounds:0;
+  room.config.rounds=(wantRounds>=1&&wantRounds<=MAX_ROUNDS)?wantRounds:(room.solo?4:6);
   room.config.bossInspect=(n<=3)?2:1;
   room.config.anxietyOut=(n>=6)?5:ANXIETY_OUT_DEFAULT;
-  room.config.completeThreshold={low:0.6,mid:0.7,high:0.8}[opts.threshold]||0.7;
+  // 同一類：`{low,mid,high}['__proto__']` 是 Object.prototype（truthy），會讓門檻變成一個物件
+  //   → `rate>=completeThreshold` 永遠 false（老闆再怎麼拚業績都不可能贏）、畫面顯示 NaN%。
+  const TH={low:0.6,mid:0.7,high:0.8};
+  room.config.completeThreshold=hasKey(TH,opts.threshold)?TH[opts.threshold]:0.7;
   room.taskDeck=shuffle(TASKS); room.tasksIssued=0; room.tasksDone=0;
   room.round=1; room.zoneStreak={}; room.winner=null; room.log=[]; room.chronicle=[];
   room.supervisorId=null; room.promoteCooldown=0; room.bossFires=BOSS_FIRES;
@@ -271,6 +292,43 @@ function enterChoose(room){
   scheduleBots(room);
 }
 
+// ---------- 揭曉演出時長推算 ----------
+// 🔴 前後端耦合警告：這是 `public/index.html` 的 `playReveal()`（揭曉演出）時序的**鏡像**，兩邊必須同步。
+//    前端逐段累加（見 public/index.html 的 playReveal 與結尾的 revAnimEndsAt）：
+//      ② 員工滑入各區    500 + n*140
+//      ③ 事件跑馬燈      + g*350 + 300
+//      ④ 老闆手電筒      + 1100
+//      ⑤ 個人結果        + n*220 + 700 +（有人待在被巡查區 ? 1600 屏息 : 0）
+//      ⑥ 戰果總結淡入    + n*120 + 1200（尾巴留給人看完）
+//      → 合計 3800 + n*480 + g*350 + (危險 ? 1600 : 0)
+//    n＝本回合有結果的員工數、g＝事件跑馬燈則數、危險＝有非主管員工待在被巡查區。
+//    ⑦ 💀 過勞猝死演出（public/focus.js 的 playKaroshi）：它「接在」上面那段之後再多播一截，
+//       所以不在 playReveal 的 t 裡，必須單獨加（2026-09-13 Codex 輪次 1 B4：漏了這段，猝死回合早 2.9 秒起算）。
+//    ⚠️ 只要有人改了 playReveal 或 playKaroshi 的時序，這裡就會失準（後果只是倒數早／晚開始，不會壞掉遊戲規則）。
+//       改任一邊的人請同步改另一邊。tests/card-flow.test.cjs 會直接讀前端原始碼把數字挖出來對，
+//       只改一邊會讓 `reveal animation length mirrors ...` 那兩個測試紅掉。
+// 為什麼算在 server 而不是等 client 回報：計時器權威必須留在 server
+//    （docs/設計探討_手機流暢與機器人模式_20260911.md:21 — 斷線／切背景／鎖屏都不能卡住遊戲），
+//    所以不能有「等某個 client 說演出播完了」這種依賴。
+// 上限推導（6 人房 = 1 老闆 + 5 員工，joinRoom/createSolo 都卡在 6）：
+//    n≤5；g≤(死掉的員工數)+(每人最多出 1 張道具)+(老闆緊盯 1 則)≤6
+//    → 3800 + 5*480 + 6*350 + 1600 + 2900 = 12800ms，所以上限要 >12800 才不會把正常局截頂。
+const REVEAL_ANIM_MAX_MS = 14000; // 硬上限：不管公式算出多少，揭曉倒數最多只延後 14 秒（防呆，保證有界）
+// 🔴 這兩個是 **前端常數的鏡像**（server 這邊只是抄數值，改前端一定要回來改這裡）：
+const KAROSHI_LEAD_MS  = 700;   // public/focus.js `playKaroshi()`：`revAnimEndsAt-Date.now()-700`＝提前 700ms 起跑
+const KAROSHI_SCENE_MS = 3600;  // public/focus.js `const KAROSHI_MS=3600`＝猝死那一幕本身的長度
+const KAROSHI_EXTRA_MS = KAROSHI_SCENE_MS - KAROSHI_LEAD_MS; // 2900：猝死回合比 playReveal 多出來的尾巴
+function revealAnimMs(rv){
+  if(!rv) return 0;
+  const n=(rv.results||[]).length, g=(rv.ghostNotes||[]).length;
+  const insp=new Set([...(rv.bossZoneKeys||[]), rv.supZoneKey].filter(Boolean));
+  const danger=(rv.results||[]).some(x=>x.zone&&insp.has(x.zone)&&!x.supervisor);
+  // 前端只有「猝死的那個人自己」會播這一幕，但倒數是整房共用的 → 只要這回合有人猝死就整房順延，
+  // 否則猝死的人讀個人總結的時間會被吃掉 2.9 秒（正是老闆裁決「演出跑完才起算」要解決的事）。
+  const karoshi=(rv.results||[]).some(x=>x.suddenDeath);
+  return Math.min(REVEAL_ANIM_MAX_MS, 3800 + n*480 + g*350 + (danger?1600:0) + (karoshi?KAROSHI_EXTRA_MS:0));
+}
+
 // ---------- 結算 ----------
 function resolveRound(room){
   clearTimer(room);
@@ -287,16 +345,20 @@ function resolveRound(room){
   const ghostNotes=[]; const warnedSet=new Set();
   for(const [gid,ga] of Object.entries(room.choices.ghost||{})){
     const g=room.players.get(gid); if(!g||!g.isGhost||g.ghostCooldown>0) continue;
+    let gdet=null;      // 作祟細節（顯示用中文名），只給大事記／搞鬼王用（不影響結算）
+    let gtarget=null;   // 報信對象的 playerId：搞鬼王要「比對到人」才能算命中，光比 round 會誤判（Codex 輪次 1 B5）
     if(ga.type==='haunt'&&bossZones.length){
       const rm=bossZones.splice(Math.floor(Math.random()*bossZones.length),1)[0];
+      gdet=ZONES[rm].name;
       ghostNotes.push({icon:'👻',text:`幽靈【${g.name}】作祟，老闆的【${ZONES[rm].name}】巡查泡湯`});
     } else if(ga.type==='disrupt'&&supZone){
       ghostNotes.push({icon:'🌀',text:`幽靈【${g.name}】打斷了主管協查`}); supZone=null;
     } else if(ga.type==='warn'&&ga.targetId&&room.players.has(ga.targetId)){
-      warnedSet.add(ga.targetId);
+      warnedSet.add(ga.targetId); gtarget=ga.targetId; gdet=(room.players.get(ga.targetId)||{}).name||null;
       ghostNotes.push({icon:'📞',text:'有幽靈偷偷通風報信…'});
     } else continue;
     g.ghostCooldown=GHOST_COOLDOWN;
+    chron(room,{type:'ghost',kind:ga.type,name:g.name,pid:g.id,detail:gdet,targetPid:gtarget});
   }
 
   // ② 道具出牌（結算期生效；出牌即消耗）
@@ -351,8 +413,9 @@ function resolveRound(room){
       e.lastZone='office';
     } else if(ch.action==='work'){
       safeCount++; r.zoneName='認真工作'; r.working=true;
+      e.workCount=(e.workCount||0)+1; // 牛馬王選材用（純計數，不參與結算）
       const ot=(e._otRound===room.round);
-      if(ot){ e.points+=2; pending[e.id]+=1; r.ot=true; e.otCount=(e.otCount||0)+1; chron(room,{type:'ot',name:e.name});
+      if(ot){ e.points+=2; e.wageEarned=(e.wageEarned||0)+2; pending[e.id]+=1; r.ot=true; e.otCount=(e.otCount||0)+1; chron(room,{type:'ot',name:e.name});
         if(e.task){ e.task.progress+=2; r.note=`🕘 加班！任務 +2（${e.task.progress}/${e.task.need}）、加班費 +2💰、過勞 +1💓`; } else r.note='🕘 加班！加班費 +2💰、過勞 +1💓';
       } else {
         pending[e.id]-=1;
@@ -361,11 +424,12 @@ function resolveRound(room){
           // 被同事凹：薪水進別人口袋、還幫他推任務——白做工
           mb.points+=WORK_WAGE; if(mb.task) mb.task.progress+=1;
           if(e.task) e.task.progress+=2;
-          r.mooched=true; r.note=`被【${mb.name}】凹了！${e.task?`任務 +2（${e.task.progress}/${e.task.need}）但`:''}薪水被拿走${mb.task?'、還幫他推進度':''}，白做工 😭`;
+          r.mooched=true; e.moochedCount=(e.moochedCount||0)+1;
+          r.note=`被【${mb.name}】凹了！${e.task?`任務 +2（${e.task.progress}/${e.task.need}）但`:''}薪水被拿走${mb.task?'、還幫他推進度':''}，白做工 😭`;
           chron(room,{type:'mooch',name:e.name,by:mb.name});
           log(room,`🙏【${mb.name}】凹了【${e.name}】：薪水 +${WORK_WAGE}💰${mb.task?'、自己任務 +1':''}`);
         } else {
-          e.points+=WORK_WAGE;
+          e.points+=WORK_WAGE; e.wageEarned=(e.wageEarned||0)+WORK_WAGE;
           if(e.task){ e.task.progress+=2; r.note=`認真工作：任務 +2（${e.task.progress}/${e.task.need}）、薪水 +${WORK_WAGE}💰、心悸 −1`; } else r.note=`認真工作：薪水 +${WORK_WAGE}💰、心悸 −1`;
         }
       }
@@ -384,15 +448,16 @@ function resolveRound(room){
         const dodge=Math.max(0, holdPct-(zone===focusZone?focusPct:0));
         if(dodge>0&&Math.random()*100<dodge){
           r.caught='held'; r.note=`🫁 老闆掃過…屏住呼吸驚險躲過！（憋氣 ${holdPct}%${zone===focusZone?`−緊盯 ${focusPct}%`:''}）`;
-          chron(room,{type:'held',name:e.name,zone:z.name,pct:holdPct});
+          chron(room,{type:'held',name:e.name,pid:e.id,zone:z.name,pct:holdPct});
         } else {
         const exIdx=e.hand.findIndex(c=>c.type==='excuse');
-        if(exIdx>=0){ const c=e.hand.splice(exIdx,1)[0]; r.caught='excused'; r.note=`被抓，但掏出藉口「${c.name}」滑走了！`; chron(room,{type:'shield',kind:'excused',name:e.name,detail:c.name}); }
-        else if(warnedSet.has(e.id)){ r.caught='warned'; r.note='被抓前收到幽靈報信，及時溜回座位！'; chron(room,{type:'shield',kind:'warned',name:e.name}); }
-        else if(guarded.has(e.id)){ r.caught='guarded'; r.note='被抓，但老鳥罩學弟擋下了！'; chron(room,{type:'shield',kind:'guarded',name:e.name}); }
-        else if(e.seniority==='senior'&&e.immunity>0){ e.immunity--; r.caught='blocked'; r.note='被抓，但免死金牌擋下！'; chron(room,{type:'shield',kind:'blocked',name:e.name}); }
+        // ⚠️ shield 一律帶 pid：搞鬼王要拿「被救的是誰」回頭跟幽靈的報信對象對帳（同名玩家不能混在一起）
+        if(exIdx>=0){ const c=e.hand.splice(exIdx,1)[0]; r.caught='excused'; r.note=`被抓，但掏出藉口「${c.name}」滑走了！`; chron(room,{type:'shield',kind:'excused',name:e.name,pid:e.id,detail:c.name}); }
+        else if(warnedSet.has(e.id)){ r.caught='warned'; r.note='被抓前收到幽靈報信，及時溜回座位！'; chron(room,{type:'shield',kind:'warned',name:e.name,pid:e.id}); }
+        else if(guarded.has(e.id)){ r.caught='guarded'; r.note='被抓，但老鳥罩學弟擋下了！'; chron(room,{type:'shield',kind:'guarded',name:e.name,pid:e.id}); }
+        else if(e.seniority==='senior'&&e.immunity>0){ e.immunity--; r.caught='blocked'; r.note='被抓，但免死金牌擋下！'; chron(room,{type:'shield',kind:'blocked',name:e.name,pid:e.id}); }
         else { const anx=(e.seniority==='junior')?3:2; pending[e.id]+=anx; r.caught=true; r.anx=anx; r.note=`被逮到！這次不算，心悸 +${anx}`;
-          chron(room,{type:'catch',name:e.name,zone:z.name});
+          chron(room,{type:'catch',name:e.name,pid:e.id,zone:z.name});
           // 主管檢舉獎金：若在主管協查區被抓
           if(supZone&&zone===supZone&&sup){ sup.points+=2; r.byBoss=false; log(room,`🕵️ 主管【${sup.name}】協查抓到【${e.name}】(+2 分)`); }
         }
@@ -402,9 +467,11 @@ function resolveRound(room){
         if(boostSet.has(e.id)) gain+=2;
         if(ch.risky) gain*=2;
         e.slackCount++; e.points+=gain; pending[e.id]+=z.anxiety; r.gain=gain;
-        if(gain>=5) chron(room,{type:'bigwin',name:e.name,zone:z.name,gain,risky:!!ch.risky});
+        if(gain>=5) chron(room,{type:'bigwin',name:e.name,pid:e.id,zone:z.name,gain,risky:!!ch.risky});
         r.note=`摸魚成功！💰+${gain}、心悸 +${z.anxiety}${ch.risky?'（🎲拼了×2）':''}`;
-        if(e.task){ e.task.progress+=1; r.note+=`；邊做邊摸 任務 +1（${e.task.progress}/${e.task.need}）`; }
+        // 命名一致性（2026-09-13）：這不是一個可以選的動作，是「摸魚」在身上有任務時的附帶效果。
+        // 舊文案寫「邊做邊摸」會讓玩家去找一個不存在的按鈕。
+        if(e.task){ e.task.progress+=1; r.note+=`；摸魚途中順手推進任務 +1（${e.task.progress}/${e.task.need}）`; }
       }
       if(ch.risky){ pending[e.id]+=RISKY_ANX; r.risky=true; if(r.caught===true) r.note+=`（🎲拼了失手，額外 +${RISKY_ANX}💓）`; }
       e.lastZone=zone;
@@ -435,12 +502,12 @@ function resolveRound(room){
       if(rr){rr.eliminated=true;rr.suddenDeath=true;rr.note+='；連續工作 3 回合，過勞猝死，轉為幽靈（免死金牌不適用）';}
       e.alive=false;e.isGhost=true;
       if(e.isSupervisor){e.isSupervisor=false;if(room.supervisorId===e.id)room.supervisorId=null;}
-      chron(room,{type:'eliminated',name:e.name});log(room,`👻【${e.name}】連續工作 ${WORK_STREAK_LIMIT} 回合，過勞猝死！`);
+      chron(room,{type:'eliminated',name:e.name,pid:e.id,cause:'overwork'});log(room,`👻【${e.name}】連續工作 ${WORK_STREAK_LIMIT} 回合，過勞猝死！`);
       continue;
     }
     if(e.anxiety>=room.config.anxietyOut){ const rr=results.find(x=>x.name===e.name); if(rr)rr.eliminated=true;
       e.alive=false; e.isGhost=true; if(e.isSupervisor){e.isSupervisor=false; if(room.supervisorId===e.id)room.supervisorId=null;}
-      chron(room,{type:'eliminated',name:e.name});
+      chron(room,{type:'eliminated',name:e.name,pid:e.id,cause:'anxiety',anxiety:e.anxiety});
       log(room,`💀【${e.name}】心悸爆表（${e.anxiety}）出局！`); }
   }
 
@@ -464,8 +531,12 @@ function resolveRound(room){
   log(room, `第 ${room.round} 回合：老闆查 ${bossZones.map(z=>ZONES[z].name).join('、')||'（無）'}${supZone?`｜主管協查 ${ZONES[supZone].name}`:''}。完成率 ${room.lastReveal.rate}%。`);
   room.phase='reveal';
   if(room.phase==='reveal'){ // 未結束才排自動進下一回合
-    room.revealSkipAt = room.solo?Date.now():Date.now() + REVEAL_MIN_SKIP*1000;
-    if(!room.solo) startTimer(room, REVEAL_SEC, ()=>{ if(room.phase==='reveal'){ advanceRound(room); broadcast(room); } });
+    // 揭曉倒數「等演出跑完才起算」（2026-09-13 老闆裁決）：REVEAL_SEC 的值一個字都沒動（仍 15 秒），
+    // 只把起點往後推一個演出時長。否則 6 人局演出吃掉 ~9 秒，玩家只剩 ~6 秒讀個人總結，
+    // 直接違反這批的最高驗收「玩家要理解自己為什麼得到這個結果」。
+    const animMs=revealAnimMs(room.lastReveal); room.revealAnimMs=animMs;
+    room.revealSkipAt = room.solo?Date.now():Date.now() + animMs + REVEAL_MIN_SKIP*1000;
+    if(!room.solo) startTimer(room, animMs/1000 + REVEAL_SEC, ()=>{ if(room.phase==='reveal'){ advanceRound(room); broadcast(room); } });
   }
 }
 
@@ -481,40 +552,184 @@ function checkWin(room){
   }
 }
 
+// ---------- 終局頒獎：三王 ----------
+// 🐟 摸魚王＝唯一的「贏」，得主直接沿用 checkWin 算好的 winnerEmpId，這裡一個字都不重算。
+// 👻 搞鬼王／🐮 牛馬王＝榮譽頭銜，只發稱號與事蹟，不參與、也不影響勝負。
+// 設計理由：死掉不是出局，是換跑道——每個人離場時都要帶著一個身分走。
+const KING_DEFS = {
+  slack:{ key:'slack', icon:'🐟', title:'摸魚王', kind:'win',   sub:'唯一的勝利' },
+  ghost:{ key:'ghost', icon:'👻', title:'搞鬼王', kind:'honor', sub:'榮譽頭銜・不計勝負' },
+  ox:   { key:'ox',    icon:'🐮', title:'牛馬王', kind:'honor', sub:'榮譽頭銜・不計勝負' },
+};
+// 第一人稱台詞（職場自嘲，調性對齊 EXCUSE_NAMES）；用回合＋名字做確定性挑選，同一局重看講同一句
+const STORY_LINES = {
+  caught:      ['我只是站起來活動一下筋骨。','這杯咖啡是要拿給您的，真的。','我在思考工作，站著比較好思考。','剛剛訊號不好，我出來收個信。'],
+  slackWin:    ['這叫策略性補充體力。','薪水沒漲，效率當然要自己調。','我沒有偷懶，我在做向下管理。','上班摸魚，才是真正的循環經濟。'],
+  suddenDeath: ['我還有一封信沒回……','原來過勞也是有進度條的。','早知道昨天就多去廁所坐一下。','幫我跟老闆說，我去休息一下下。'],
+  held:        ['肺活量是我最後的職業技能。','別過來、別過來、別過來……','這一刻我跟影印機融為一體。','憋氣三十秒，換三十年勞保。'],
+};
+function sayLine(kind,name,round){
+  const list=STORY_LINES[kind]; if(!list||!list.length) return '';
+  let h=Math.abs(round||0); for(const ch of String(name||'')) h+=ch.codePointAt(0);
+  return list[h%list.length];
+}
+function quoteOf(kind,name,round){ const l=sayLine(kind,name,round); return l?`${name}：「${l}」`:''; }
+// 大事記工具：chron 只存區塊中文名，反查回區塊設定才拿得到風險級距
+const ZONE_BY_NAME = Object.fromEntries(Object.values(ZONES).map(z=>[z.name,z]));
+function chronOf(room){ return room.chronicle||[]; }
+function isSame(ev,p){ return ev.pid ? ev.pid===p.id : ev.name===p.name; }
+// 「選最精彩」：同一種事件發生多次時用 score 挑最戲劇的那筆（舊版一律 find 取第一筆＝最爆笑的常被吃掉）
+function bestOf(list, score){ let best=null, bs=-Infinity; for(const e of list){ const s=score(e); if(s>bs){bs=s;best=e;} } return best; }
+
+function slackDeed(room,p){
+  const c=chronOf(room);
+  const bw=bestOf(c.filter(x=>x.type==='bigwin'&&isSame(x,p)), e=>e.gain*10+e.round);
+  const hd=bestOf(c.filter(x=>x.type==='held'&&isSame(x,p)), e=>e.pct*10+e.round);
+  const ct=c.filter(x=>x.type==='catch'&&isSame(x,p)).length;
+  const base=`偷懶 ${p.points}💰・摸魚 ${p.slackCount} 次`;
+  if(bw) return `${base}；第 ${bw.round} 回合在${bw.zone}${bw.risky?'賭上性命':''}一口氣爽賺 ${bw.gain}💰。`;
+  if(hd) return `${base}；第 ${hd.round} 回合在${hd.zone}憋住 ${hd.pct}% 的氣，硬是從放大鏡底下活了下來。`;
+  if(ct) return `${base}；被逮到 ${ct} 次還是爬上了王座，臉皮比考績表厚。`;
+  return `${base}；全程沒被老闆抓到一次，乾淨得像沒來上班。`;
+}
+const GHOST_ACT_TEXT = { haunt:'扯掉老闆一次巡查', warn:'向陽間通風報信', disrupt:'打斷主管協查' };
+function ghostDeed(s){
+  const head=s.exit?`第 ${s.exit} 回合下班（永久）`:'半路變成了幽靈';
+  if(!s.acts.length) return `${head}，之後在天花板上飄了一整局，一次都沒下手——鬼也是會累的。`;
+  const kinds=[...new Set(s.acts.map(a=>GHOST_ACT_TEXT[a.kind]).filter(Boolean))];
+  return `${head}，之後作祟 ${s.acts.length} 次：${kinds.join('、')}${s.hits?`，其中 ${s.hits} 次真的救到了陽間的同事`:''}。`;
+}
+function oxDeed(room,p){
+  const c=chronOf(room);
+  const dead=c.find(x=>x.type==='eliminated'&&isSame(x,p));
+  const fired=c.find(x=>x.type==='fire'&&isSame(x,p));
+  const bits=[`認真工作 ${p.workCount||0} 回合`,`領了 ${p.wageEarned||0}💰 血汗錢`];
+  if(p.otCount) bits.push(`加班 ${p.otCount} 次`);
+  if(p.moochedCount) bits.push(`被同事凹去白做工 ${p.moochedCount} 次`);
+  let tail='。';
+  if(dead&&dead.cause==='overwork') tail=`，最後在第 ${dead.round} 回合過勞猝死在自己的鍵盤上。`;
+  else if(dead) tail=`，最後在第 ${dead.round} 回合心悸爆表倒下。`;
+  else if(fired) tail=`，做到第 ${fired.round} 回合還是收到了資遣信封。`;
+  else if(!(p.slackCount||0)) tail='，全局零摸魚——這不是玩家，這是員工。';
+  return bits.join('、')+tail;
+}
+// 回傳三個王（固定三筆，從缺就是 vacant:true）；不讀也不改任何勝負狀態
+function pickKings(room, side, winnerEmpId){
+  const c=chronOf(room);
+  const emps=[...room.players.values()].filter(p=>p.role==='emp');
+  const exitRound=p=>{ const e=c.find(x=>(x.type==='eliminated'||x.type==='fire')&&isSame(x,p)); return e?e.round:null; };
+
+  // 🐟 摸魚王：checkWin 說誰是王就是誰；老闆贏＝沒有摸魚王（維持現行勝負語意）
+  const sk=winnerEmpId?room.players.get(winnerEmpId):null;
+  const slackKing = sk
+    ? { ...KING_DEFS.slack, holderId:sk.id, holder:sk.name, deed:slackDeed(room,sk) }
+    : { ...KING_DEFS.slack, holderId:null, holder:null, vacant:true, deed:'這局老闆提早收工——沒有人戴上那頂歪歪的紙皇冠。' };
+
+  // 👻 搞鬼王：候選是「幽靈」，不能沿用 aliveEmps（幽靈在那裡被排除掉了）
+  const ghosts=emps.filter(p=>p.isGhost||!p.alive);
+  let ghostKing;
+  if(!ghosts.length){
+    ghostKing={ ...KING_DEFS.ghost, holderId:null, holder:null, vacant:true, deed:'全員活到下班，這局沒有半隻鬼——恭喜，也有點無聊。' };
+  } else {
+    const stat=g=>{
+      const acts=c.filter(x=>x.type==='ghost'&&isSame(x,g));
+      // 報信有沒有真的救到人：必須「同一回合」**且**「就是我報信的那個人」被救到才算命中。
+      // 🔴 2026-09-13 Codex 輪次 1 B5：舊版只比 `s.round===a.round`，兩隻鬼同回合報不同人時，
+      //    沒救到人的那隻也白撿一次命中 → 拿到王冠還附一句他沒做過的假事蹟。
+      //    比對用 playerId（`targetPid` ↔ `pid`）；缺任一邊就算不命中（fail closed：寧可少發，不亂發）。
+      const savedIn=(round,pid)=>!!pid&&c.some(s=>s.type==='shield'&&s.kind==='warned'&&s.round===round&&s.pid===pid);
+      const hits=acts.filter(a=>a.kind==='warn'&&savedIn(a.round,a.targetPid)).length;
+      return { g, acts, hits, score:acts.length*10+hits*5, exit:exitRound(g) };
+    };
+    // 作祟多的優先；全都沒出手時，換成「死最早、飄最久」的那位（讓他至少帶著身分離場）
+    const w=ghosts.map(stat).sort((a,b)=>b.score-a.score||(a.exit??99)-(b.exit??99)||a.g.name.localeCompare(b.g.name))[0];
+    ghostKing={ ...KING_DEFS.ghost, holderId:w.g.id, holder:w.g.name, acts:w.acts.length, deed:ghostDeed(w) };
+  }
+
+  // 🐮 牛馬王：工作次數優先、薪水累積次之。照實頒——摸魚王同時做最多工就讓他戴兩頂，那才是最好笑的故事
+  const oxPool=emps.filter(p=>(p.workCount||0)>0);
+  let oxKing;
+  if(!oxPool.length){
+    oxKing={ ...KING_DEFS.ox, holderId:null, holder:null, vacant:true, deed:'這局沒有人認真工作過——整間辦公室都在摸魚，老闆氣到手抖。' };
+  } else {
+    const w=[...oxPool].sort((a,b)=>(b.workCount||0)-(a.workCount||0)||(b.wageEarned||0)-(a.wageEarned||0)||(b.otCount||0)-(a.otCount||0)||a.name.localeCompare(b.name))[0];
+    oxKing={ ...KING_DEFS.ox, holderId:w.id, holder:w.name, workCount:w.workCount||0, wageEarned:w.wageEarned||0, deed:oxDeed(room,w) };
+  }
+  return [slackKing, ghostKing, oxKing];
+}
+
 // 終局故事：把大事記編成一段童話小說（storybook epilogue）
-function buildStory(room, side, reason, winnerEmpId){
-  const c=room.chronicle||[];
+// 2026-09-13 兩個修正：①同種事件「選最精彩」不再取第一筆 ②開場／結局／頒獎保底，
+//   中段最多 6 幕 → 總長仍 ≤9 段（舊版事件一多，slice(0,9) 會把結局整段砍掉，玩家看不到自己為什麼贏）
+const STORY_MID_MAX = 6;
+function buildStory(room, side, reason, winnerEmpId, kings){
+  const c=chronOf(room);
   const b=bossOf(room), bn=b?b.name:'老闆';
   const emps=[...room.players.values()].filter(p=>p.role==='emp');
-  const P=[];
-  P.push(`在一間被施了魔法的老辦公室裡，${bn} 又戴上了那枚小皇冠，握緊金色放大鏡踏進走廊。今天要對付的員工是：${emps.map(p=>p.name).join('、')}。上班鐘敲響，一場貓抓老鼠的一天開始了。`);
-  const fc=c.find(e=>e.type==='catch');
-  if(fc) P.push(`第 ${fc.round} 回合，放大鏡的光停在${fc.zone}——${fc.name} 被逮個正著，慘叫聲穿透了三面隔板。`);
-  const hd=c.find(e=>e.type==='held');
-  if(hd) P.push(`最驚險的一幕在第 ${hd.round} 回合：老闆的目光掃過${hd.zone}，${hd.name} 縮在角落屏住呼吸，臉憋得比薪水條還綠——竟然硬是躲了過去。`);
-  const sh=c.find(e=>e.type==='shield');
-  if(sh) P.push({
-    excused:`${sh.name} 被抓包的瞬間掏出「${sh.detail||'萬用藉口'}」，滑得比下班打卡還快。`,
-    warned:`天花板上飄來一通幽靈密電，${sh.name} 在放大鏡到位前一秒溜回了座位。`,
-    guarded:`千鈞一髮之際，老鳥張開翅膀把 ${sh.name} 護在身後，深藏功與名。`,
-    blocked:`免死金牌在關鍵時刻閃閃發光，${sh.name} 拍拍灰塵若無其事地走回座位。`,
-  }[sh.kind]||'');
-  const bw=c.find(e=>e.type==='bigwin');
-  if(bw) P.push(`而 ${bw.name} 在${bw.zone}${bw.risky?'賭上性命':''}爽賺了 ${bw.gain}💰，嘴角的笑意藏都藏不住。`);
-  const mo=c.find(e=>e.type==='mooch');
-  if(mo) P.push(`${mo.name} 被 ${mo.by} 一句「拜託啦～」凹去做工，做得滿頭大汗——薪水卻悄悄滑進了別人的口袋。`);
-  const ot=c.find(e=>e.type==='ot');
-  if(ot) P.push(`${bn} 甩出了加班令。${ot.name} 含淚加班到燈火通明，領了加班費，也熬出了黑眼圈。`);
-  const pm=c.find(e=>e.type==='promote');
-  if(pm) P.push(`第 ${pm.round} 回合，${pm.name} 被升為代理主管——同事們的眼神，從羨慕慢慢變成了警戒。`);
-  const fr=c.find(e=>e.type==='fire');
-  if(fr) P.push(`${fr.name} 收到了資遣信封。抱著紙箱走出大門時，桌上的多肉還沒來得及澆水。`);
-  const dead=c.filter(e=>e.type==='eliminated').map(e=>e.name);
-  if(dead.length) P.push(`${dead.join('、')} 心悸爆表倒下，化作了辦公室的幽靈——從此在天花板上飄來飄去，伺機替活著的同事通風報信。`);
+  // 中段候選：w＝這類事件的戲劇權重（用來選最精彩），round＝選完排回時間順序用
+  const mid=[]; const add=(w,round,text)=>{ if(text) mid.push({w,round:round||0,text}); };
+
+  const catchEv=bestOf(c.filter(e=>e.type==='catch'), e=>(ZONE_BY_NAME[e.zone]?.slack||0)*10+e.round);
+  if(catchEv) add(50+(ZONE_BY_NAME[catchEv.zone]?.slack||0)*5, catchEv.round,
+    `第 ${catchEv.round} 回合，放大鏡的光停在${catchEv.zone}——${catchEv.name} 被逮個正著，慘叫聲穿透了三面隔板。${quoteOf('caught',catchEv.name,catchEv.round)}`);
+
+  const heldEv=bestOf(c.filter(e=>e.type==='held'), e=>e.pct*10+e.round);
+  if(heldEv) add(60, heldEv.round,
+    `最驚險的一幕在第 ${heldEv.round} 回合：老闆的目光掃過${heldEv.zone}，${heldEv.name} 縮在角落屏住呼吸（憋 ${heldEv.pct}%），臉憋得比薪水條還綠——竟然硬是躲了過去。${quoteOf('held',heldEv.name,heldEv.round)}`);
+
+  const SHIELD_W={warned:8,guarded:6,blocked:4,excused:2};
+  const shEv=bestOf(c.filter(e=>e.type==='shield'), e=>(SHIELD_W[e.kind]||0)*10+e.round);
+  if(shEv) add(40+(SHIELD_W[shEv.kind]||0), shEv.round, {
+    excused:`${shEv.name} 被抓包的瞬間掏出「${shEv.detail||'萬用藉口'}」，滑得比下班打卡還快。`,
+    warned:`天花板上飄來一通幽靈密電，${shEv.name} 在放大鏡到位前一秒溜回了座位。`,
+    guarded:`千鈞一髮之際，老鳥張開翅膀把 ${shEv.name} 護在身後，深藏功與名。`,
+    blocked:`免死金牌在關鍵時刻閃閃發光，${shEv.name} 拍拍灰塵若無其事地走回座位。`,
+  }[shEv.kind]||'');
+
+  const bwEv=bestOf(c.filter(e=>e.type==='bigwin'), e=>e.gain*10+(e.risky?5:0)+e.round);
+  if(bwEv) add(45+bwEv.gain*2, bwEv.round,
+    `而 ${bwEv.name} 在${bwEv.zone}${bwEv.risky?'賭上性命':''}爽賺了 ${bwEv.gain}💰，嘴角的笑意藏都藏不住。${quoteOf('slackWin',bwEv.name,bwEv.round)}`);
+
+  const moEv=bestOf(c.filter(e=>e.type==='mooch'), e=>e.round);
+  if(moEv) add(38, moEv.round, `${moEv.name} 被 ${moEv.by} 一句「拜託啦～」凹去做工，做得滿頭大汗——薪水卻悄悄滑進了別人的口袋。`);
+
+  const otEv=bestOf(c.filter(e=>e.type==='ot'), e=>e.round);
+  if(otEv) add(35, otEv.round, `${bn} 甩出了加班令。${otEv.name} 含淚加班到燈火通明，領了加班費，也熬出了黑眼圈。`);
+
+  const ghosts=c.filter(e=>e.type==='ghost');
+  const ghEv=bestOf(ghosts, e=>({haunt:30,disrupt:20,warn:10}[e.kind]||0)+e.round);
+  if(ghEv) add(42+ghosts.length*2, ghEv.round, {
+    haunt:`第 ${ghEv.round} 回合，幽靈 ${ghEv.name} 從天花板探出頭，把老闆往${ghEv.detail||'某一區'}的腳步硬生生扯了回來。`,
+    warn:`幽靈 ${ghEv.name} 壓低聲音對${ghEv.detail?`【${ghEv.detail}】`:'陽間的同事'}通風報信——死了還在幫同事看門，這就是義氣。`,
+    disrupt:`幽靈 ${ghEv.name} 一陣陰風吹亂了主管的協查表，主管抓了半天只抓到自己的影子。`,
+  }[ghEv.kind]||'');
+
+  const pmEv=bestOf(c.filter(e=>e.type==='promote'), e=>e.round);
+  if(pmEv) add(30, pmEv.round, `第 ${pmEv.round} 回合，${pmEv.name} 被升為代理主管——同事們的眼神，從羨慕慢慢變成了警戒。`);
+
+  const frEv=bestOf(c.filter(e=>e.type==='fire'), e=>e.round);
+  if(frEv) add(55, frEv.round, `${frEv.name} 收到了資遣信封。抱著紙箱走出大門時，桌上的多肉還沒來得及澆水。`);
+
+  const deaths=c.filter(e=>e.type==='eliminated');
+  if(deaths.length){
+    const sd=deaths.filter(e=>e.cause==='overwork'), anx=deaths.filter(e=>e.cause!=='overwork');
+    const parts=[];
+    if(sd.length){ const q=quoteOf('suddenDeath',sd[0].name,sd[0].round);
+      parts.push(`${sd.map(e=>e.name).join('、')} 連做三回合，直接過勞猝死在鍵盤上${q?`——${q}`:''}`); }
+    if(anx.length) parts.push(`${anx.map(e=>e.name).join('、')} 心悸爆表倒下`);
+    add(70, deaths[deaths.length-1].round,
+      `${parts.join('；')}。他們化作了辦公室的幽靈——不是出局，是換了跑道：從此在天花板上飄來飄去，替活著的同事通風報信、扯老闆的後腿。`);
+  }
+
+  mid.sort((a,b)=>b.w-a.w||a.round-b.round);                                        // ① 先挑最精彩
+  const picked=mid.slice(0,STORY_MID_MAX).sort((a,b)=>a.round-b.round||b.w-a.w);    // ② 再排回時間順序
+  const P=[`在一間被施了魔法的老辦公室裡，${bn} 又戴上了那枚小皇冠，握緊金色放大鏡踏進走廊。今天要對付的員工是：${emps.map(p=>p.name).join('、')}。上班鐘敲響，一場貓抓老鼠的一天開始了。`,
+    ...picked.map(x=>x.text)];
   if(side==='boss') P.push(`下班鐘響。${bn} 站在辦公室中央高舉業績獎盃：${reason}。員工們癱在文件堆裡，連嘆氣的力氣都沒有了。`);
   else { const k=room.players.get(winnerEmpId);
     P.push(`下班鐘響。${k?k.name:'某人'} 戴著歪歪的紙皇冠站上文件山頂，高舉金色咖啡杯——${reason}！${bn} 癱坐在角落，放大鏡滾落在地。`); }
-  P.push('明天太陽照常升起，影印機照常卡紙。是牛馬，還是摸魚王？——明天上班，再見分曉。');
+  const board=(kings||[]).map(k=>`${k.icon} ${k.title}：${k.holder||'從缺'}`).join('｜');
+  P.push(`${board?`本日頒獎——${board}。`:''}明天太陽照常升起，影印機照常卡紙。是牛馬，還是摸魚王？明天上班，再見分曉。`);
   return P.filter(Boolean).slice(0,9);
 }
 
@@ -522,26 +737,36 @@ function endGame(room, side, reason, winnerEmpId){
   clearTimer(room); room.phase='ended'; touch(room);
   const th=room.config.anxietyOut;
   const emps=[...room.players.values()].filter(p=>p.role==='emp');
+  const kings=pickKings(room, side, winnerEmpId);
+  // 稱號位階：摸魚王 > 搞鬼王 > 牛馬王（同一人同時上榜時，排行榜只顯示最高的那個）
+  const kingTitle={}, kingDeed={}, kingKeys={};
+  for(const k of kings){ if(!k.holderId) continue;
+    (kingKeys[k.holderId]=kingKeys[k.holderId]||[]).push(k.key);
+    if(!kingTitle[k.holderId]){ kingTitle[k.holderId]=`${k.icon} ${k.title}`; kingDeed[k.holderId]=k.deed; } }
   const ranking=emps.map(p=>{
     const comp=Math.max(0, p.points + p.slackCount*2 + (p.alive?5:0) - p.anxiety);
     let title;
-    if(!p.alive) title=((p.otCount||0)>=2)?'過勞牛馬 🐂💦':'壯烈畢業 💀';
+    if(kingTitle[p.id]) title=kingTitle[p.id];
+    else if(!p.alive) title=((p.otCount||0)>=2)?'過勞牛馬 🐂💦':'壯烈畢業 💀';
     else if((p.otCount||0)>=2) title='加班狂牛馬 🐂';
     else if(p.slackCount===0) title='全勤牛馬 🐂';
     else if(p.anxiety>=th-2) title='驚弓之鳥 😰';
     else if(p.seniority==='senior') title='老油條 🦉';
     else title='摸魚同好 😎';
     const grade=comp>=20?'S':comp>=14?'A':comp>=8?'B':'C';
-    return { name:p.name, seniority:p.seniority, slackCount:p.slackCount, points:p.points, alive:p.alive, anxiety:p.anxiety, comp, title, grade, isKing:p.id===winnerEmpId };
+    return { name:p.name, seniority:p.seniority, slackCount:p.slackCount, points:p.points, alive:p.alive, anxiety:p.anxiety,
+      workCount:p.workCount||0, comp, title, grade, isKing:p.id===winnerEmpId,
+      kings:kingKeys[p.id]||[], kingDeed:kingDeed[p.id]||null };
   }).sort((a,b)=>(b.isKing?1:0)-(a.isKing?1:0)||b.comp-a.comp);
   const outCount=emps.filter(p=>!p.alive).length;
   const rate=room.tasksIssued>0?Math.round(room.tasksDone/room.tasksIssued*100):0;
   const bp=bossOf(room);
   const bossGrade=(side==='boss')?((rate>=80||outCount===emps.length)?'S':'A'):(rate>=50?'B':'C');
-  room.winner={ side, reason, winnerEmpId, ranking, rate, tasksDone:room.tasksDone, tasksIssued:room.tasksIssued,
-    story: buildStory(room, side, reason, winnerEmpId),
+  room.winner={ side, reason, winnerEmpId, kings, ranking, rate, tasksDone:room.tasksDone, tasksIssued:room.tasksIssued,
+    story: buildStory(room, side, reason, winnerEmpId, kings),
     boss:{ name:bp?bp.name:'老闆', outCount, total:emps.length, rate, grade:bossGrade } };
   log(room, `🏁 結束：${side==='boss'?'老闆獲勝':'員工陣營獲勝'} — ${reason}`);
+  log(room, `👑 三王：${kings.map(k=>`${k.icon}${k.title}＝${k.holder||'從缺'}`).join('｜')}`);
 }
 
 function advanceRound(room){ checkWin(room); if(room.phase==='ended')return; room.round++; enterAdmin(room); }
@@ -700,7 +925,7 @@ function botAdmin(room){
     if(f&&Math.random()<0.8){
       if(f.seniority==='senior'&&f.immunity>0){ f.immunity--; f.canBeFired=false; room.bossFires--; log(room,`🛡️【${f.name}】用免死金牌擋下資遣！`); }
       else { f.alive=false; f.isGhost=true; if(f.isSupervisor){f.isSupervisor=false; if(room.supervisorId===f.id)room.supervisorId=null;}
-        room.bossFires--; chron(room,{type:'fire',name:f.name}); log(room,`🔨 老闆資遣了【${f.name}】！（剩 ${room.bossFires} 次）`); }
+        room.bossFires--; chron(room,{type:'fire',name:f.name,pid:f.id}); log(room,`🔨 老闆資遣了【${f.name}】！（剩 ${room.bossFires} 次）`); }
     }
   }
   // 部門經費夠就從固定槽補一張加班令，手上有就對「當前偷懶王」打出（記仇橡皮筋）
@@ -777,10 +1002,72 @@ function tryResolve(room){
 }
 
 // ---------- Socket ----------
+// handler 防護層：socket.io 不攔 handler 例外，handler 丟出去的例外會直接殺掉整個 process，
+// 而房間狀態只存在記憶體（README：重啟即清空）→ 一個畸形封包＝所有房間的牌局同時消失。
+// 實測（修補前）：客戶端送 socket.emit('drawRoundCards','hello')，cb 就是字串；
+//   `cb?.()` 只擋 null/undefined、`cb&&cb()` 只擋 falsy，兩者都擋不住「不是函式」
+//   → TypeError: cb is not a function → process 退出。
+// 對策：所有 handler 一律走 on()／onNoAck() 註冊，在進 handler 之前把參數正規化，
+// handler 內部寫法一行都不用改（cb?.()／cb&&cb() 全部原樣保留）。
+//   on(ev,fn)      最後一個宣告參數是 ack callback（本檔絕大多數 handler）
+//   onNoAck(ev,fn) 沒有 ack 的單向事件（最後一個參數是 payload、或根本沒宣告參數）
+// ⚠️ 新增 handler 時選錯會怎樣：該有 ack 卻用 onNoAck ＝ 少一層保護；沒 ack 卻用 on ＝ payload
+//    會被換成 no-op（功能整個失效，測試時馬上看得出來）。預設用 on。
+// ⚠️ 兩個已知邊界（不是 bug，是這層保護管不到的地方）：
+//    1. 靠 fn.length 認 ack 位置，所以 handler 不要用預設值參數或 rest（fn.length 會少算）。
+//    2. 只包同步執行那一段；setTimeout／setInterval／第三方 callback 裡丟的例外仍會殺 process
+//       （例如 scheduleBots 的 setTimeout、閒置回收器）。那些不是客戶端能直接餵資料的入口。
+// 🔴 2026-09-13 Codex 輪次 1 B3：payload 位「一律補成 {}」是錯的修法——它把畸形封包變成合法的空請求，
+//    實跑出來的後果：createRoom(null) 靜默建房、setPassword(null) **靜默解除房間密碼**、
+//    主管 submitChoice(null) 靜默鎖定「不協查」並可能直接觸發結算。
+//    改法：payload 位一定要是「真的物件」，否則直接回 {error:'無效請求'} 並且**不進 handler**（零副作用）。
+//    崩潰保護不倒退：拒絕發生在呼叫 handler 之前，解構 undefined 的那顆地雷根本踩不到。
+// payload 允許「不給／給 null」的白名單：只放 HEAD 本來就吃得下空 payload 的 handler。
+//    startGame 的內文本來就是 `startGame(room,opts||{})`，空 payload ＝用預設設定開局，不是新行為。
+const EMPTY_PAYLOAD_OK = new Set(['startGame']);
+// 真的 payload ＝ 純物件（POJO）。字串／數字／布林／陣列／**二進位**都是畸形（本檔沒有任何 handler 收這些）。
+// 🔴 2026-09-13 Codex 輪次 2 B3-2：`typeof v==='object'` 不等於「純物件」。socket.io 原生支援二進位，
+//    Buffer／Uint8Array／ArrayBuffer／Date 全部 typeof 'object'，會整批從舊版檢查底下溜過去，
+//    輪次 1 修掉的三條（建房／解除密碼／主管鎖定不協查）換成 Buffer 就原樣復現。
+//    三道檢查都選「跨 realm 也成立」的做法（Array.isArray／ArrayBuffer.isView／Object#toString），
+//    不用 instanceof 也不比對 Object.prototype——測試用 vm 跑，那兩種寫法會被 realm 差異騙。
+function isPayloadObject(v){
+  if(typeof v!=='object'||v===null) return false;
+  if(Array.isArray(v)||ArrayBuffer.isView(v)) return false;        // 陣列／Buffer／TypedArray／DataView
+  return Object.prototype.toString.call(v)==='[object Object]';    // 擋 ArrayBuffer／Date／Map／Set／RegExp…
+}
+function guardHandlers(socket){
+  const noopAck=()=>{};                        // 客戶端沒給 ack（或給了垃圾）時的替身：呼叫不做事也不炸
+  const wrap=(event,fn,hasAck)=>(...raw)=>{
+    const args=raw.slice();
+    const lastRaw=args.length?args[args.length-1]:undefined; // socket.io 保證：真的 ack 一定在最後一個
+    const n=fn.length;                         // handler 宣告的參數個數（ack 一律宣告在最後一個）
+    while(args.length<n) args.push(undefined); // 客戶端少給參數 → 補齊，免得 ({a,b}) 解構 undefined 就炸
+    const payloadSlots=hasAck?Math.max(0,n-1):n;
+    if(hasAck&&n>0&&typeof args[n-1]!=='function')                  // ack 位：不是函式就換掉
+      args[n-1]=(typeof lastRaw==='function')?lastRaw:noopAck;      //   客戶端多塞參數時仍把真 ack 接回來
+    const ack=(hasAck&&n>0&&typeof args[n-1]==='function')?args[n-1]:null;
+    for(let i=0;i<payloadSlots;i++){                                // payload 位：驗型別，不合法就明確退件
+      if(isPayloadObject(args[i])) continue;
+      if(args[i]==null&&EMPTY_PAYLOAD_OK.has(event)){ args[i]={}; continue; }
+      if(ack){ try{ ack({error:'無效請求'}); }catch(e){} }           // 單向事件（onNoAck）沒得回話，就只是靜靜丟掉
+      return;                                                       // 不呼叫 handler ＝ 保證零狀態變更
+    }
+    try{ return fn(...args); }
+    catch(err){
+      // 不是吞錯：完整 stack 照樣印出來（跟崩潰時印的同一份），差別只在別人的房間不用陪葬
+      console.error(`🔴 socket handler 例外 event=${event} socket=${socket.id}`, err);
+      if(ack){ try{ ack({error:'伺服器內部錯誤，這個動作沒有生效'}); }catch(e){} }
+    }
+  };
+  return { on:(event,fn)=>socket.on(event,wrap(event,fn,true)), onNoAck:(event,fn)=>socket.on(event,wrap(event,fn,false)) };
+}
+
 io.on('connection', (socket)=>{
+  const {on,onNoAck}=guardHandlers(socket);
   socket.data.roomCode=null;
 
-  socket.on('createRoom', ({name, roomName, password}, cb)=>{
+  on('createRoom', ({name, roomName, password}, cb)=>{
     if(rooms.size>=MAX_ROOMS) return cb&&cb({error:`房間已滿（${MAX_ROOMS}/${MAX_ROOMS}），請稍後再試`});
     name=(name||'玩家').toString().slice(0,12);
     roomName=(roomName||'').toString().trim().slice(0,16)||`${name} 的房間`;
@@ -799,7 +1086,7 @@ io.on('connection', (socket)=>{
   });
 
   // c-lite 單人練習：真人當員工 ＋ AI 同事 ＋ 腳本老闆（開房即開局；可選 3~6 人局）
-  socket.on('createSolo', ({name,threshold,players,seniority}, cb)=>{
+  on('createSolo', ({name,threshold,players,seniority}, cb)=>{
     if(rooms.size>=MAX_ROOMS) return cb&&cb({error:`房間已滿（${MAX_ROOMS}/${MAX_ROOMS}），請稍後再試`});
     name=(name||'玩家').toString().slice(0,12);
     const total=Math.min(6,Math.max(3,parseInt(players)||4)); // 含你＋AI老闆
@@ -824,7 +1111,7 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true,code,playerId:pid}); broadcast(room);
   });
 
-  socket.on('joinRoom', ({code,name,password}, cb)=>{
+  on('joinRoom', ({code,name,password}, cb)=>{
     code=(code||'').toString().toUpperCase().trim(); name=(name||'玩家').toString().slice(0,12);
     const room=rooms.get(code);
     if(!room) return cb&&cb({error:'找不到房間'});
@@ -841,7 +1128,7 @@ io.on('connection', (socket)=>{
   });
 
   // 斷線重連：憑 playerId 綁回原座位（任何階段皆可，含遊戲中）
-  socket.on('rejoin', ({code,playerId}, cb)=>{
+  on('rejoin', ({code,playerId}, cb)=>{
     code=(code||'').toString().toUpperCase().trim();
     const room=rooms.get(code);
     if(!room) return cb&&cb({error:'房間已不存在'});
@@ -854,9 +1141,9 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true,code,playerId:me.id}); broadcast(room);
   });
 
-  socket.on('listRooms', (cb)=>{ cb&&cb({ok:true, rooms:lobbySnapshot(), count:rooms.size, max:MAX_ROOMS}); });
+  on('listRooms', (cb)=>{ cb&&cb({ok:true, rooms:lobbySnapshot(), count:rooms.size, max:MAX_ROOMS}); });
 
-  socket.on('spectateRoom', ({code,password}, cb)=>{
+  on('spectateRoom', ({code,password}, cb)=>{
     code=(code||'').toString().toUpperCase().trim();
     const room=rooms.get(code);
     if(!room) return cb&&cb({error:'找不到房間'});
@@ -869,10 +1156,10 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true});
     socket.emit('spec', specView(room));
   });
-  socket.on('specLeave', ()=>{ const room=rooms.get(socket.data.specCode); if(room&&room.spectators) room.spectators.delete(socket.id); socket.data.specCode=null; });
+  onNoAck('specLeave', ()=>{ const room=rooms.get(socket.data.specCode); if(room&&room.spectators) room.spectators.delete(socket.id); socket.data.specCode=null; });
 
   // 房主變更/解除房間密碼（已在房內者不受影響；舊邀請連結的 key 會失效）
-  socket.on('setPassword', ({password}, cb)=>{
+  on('setPassword', ({password}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return cb&&cb({error:'你不在任何房間'});
     if(socket.data.playerId!==room.hostId) return cb&&cb({error:'只有房主能改密碼'});
     password=(password||'').toString().trim();
@@ -883,7 +1170,7 @@ io.on('connection', (socket)=>{
   });
 
   // 房主主動關閉房間，釋出名額
-  socket.on('closeRoom', (cb)=>{
+  on('closeRoom', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return cb&&cb({error:'你不在任何房間'});
     if(socket.data.playerId!==room.hostId) return cb&&cb({error:'只有房主能關閉房間'});
     clearTimer(room);
@@ -896,14 +1183,14 @@ io.on('connection', (socket)=>{
   });
 
   // 邀請連結 QR Code（伺服器端產生，不經第三方服務）
-  socket.on('makeQR', ({text}, cb)=>{
+  on('makeQR', ({text}, cb)=>{
     if(typeof text!=='string'||text.length>300||!/^https?:\/\//.test(text)) return cb&&cb({error:'無效的連結'});
     QRCode.toDataURL(text, {width:300, margin:1}, (e,dataUrl)=>{
       cb&&cb(e?{error:'QR Code 產生失敗'}:{ok:true, dataUrl});
     });
   });
 
-  socket.on('startGame', (opts, cb)=>{
+  on('startGame', (opts, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return;
     if(socket.data.playerId!==room.hostId) return cb&&cb({error:'只有房主能開始'});
     touch(room);
@@ -911,7 +1198,7 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true}); broadcast(room);
   });
 
-  socket.on('assignTask', ({targetId}, cb)=>{
+  on('assignTask', ({targetId}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
     const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能派任務'});
     const t=room.players.get(targetId);
@@ -922,7 +1209,7 @@ io.on('connection', (socket)=>{
     log(room,`📋 老闆派給【${t.name}】：${name}`); cb&&cb({ok:true}); broadcast(room);
   });
 
-  socket.on('promote', ({targetId}, cb)=>{
+  on('promote', ({targetId}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
     const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能升職'});
     if(room.promoteCooldown>0) return cb&&cb({error:`升職令冷卻中（還 ${room.promoteCooldown} 回）`});
@@ -935,7 +1222,7 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true}); broadcast(room);
   });
 
-  socket.on('fire', ({targetId}, cb)=>{
+  on('fire', ({targetId}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
     const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能資遣'});
     if(room.bossFires<=0) return cb&&cb({error:'資遣次數用完了'});
@@ -943,13 +1230,13 @@ io.on('connection', (socket)=>{
     if(!t||t.role!=='emp'||!t.alive||!t.canBeFired) return cb&&cb({error:'此人不可資遣（需有逾期紀錄）'});
     if(t.seniority==='senior'&&t.immunity>0){ t.immunity--; t.canBeFired=false; room.bossFires--; log(room,`🛡️【${t.name}】用免死金牌擋下資遣！`); return cb&&cb({ok:true, blocked:true}), broadcast(room); }
     t.alive=false; t.isGhost=true; if(t.isSupervisor){t.isSupervisor=false; if(room.supervisorId===t.id)room.supervisorId=null;}
-    room.bossFires--; chron(room,{type:'fire',name:t.name}); log(room,`🔨 老闆資遣了【${t.name}】！（剩 ${room.bossFires} 次）`);
+    room.bossFires--; chron(room,{type:'fire',name:t.name,pid:t.id}); log(room,`🔨 老闆資遣了【${t.name}】！（剩 ${room.bossFires} 次）`);
     cb&&cb({ok:true}); broadcast(room);
     checkWin(room); broadcast(room);
   });
 
   // ---- 點數經濟：補給市場（admin 階段限定；員工用💰、老闆用部門經費買加班令）----
-  socket.on('buyCard', ({idx}, cb)=>{
+  on('buyCard', ({idx}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return cb&&cb({error:'只有老闆行政時間能採購'});
     const me=room.players.get(socket.data.playerId); if(!me||!me.alive) return;
     if(me._boughtRound===room.round) return cb&&cb({error:'每回合限購 1 件'});
@@ -976,7 +1263,7 @@ io.on('connection', (socket)=>{
   });
 
   // 深呼吸：3💰 洗 1💓（限心悸≥門檻-2、每回合 1 次）
-  socket.on('breathe', (cb)=>{
+  on('breathe', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||(room.phase!=='admin'&&room.phase!=='choosing')) return cb&&cb({error:'現在不是深呼吸的時候'});
     const me=room.players.get(socket.data.playerId); if(!me||me.role!=='emp'||!me.alive) return cb&&cb({error:'不可用'});
     if(me._breathedRound===room.round) return cb&&cb({error:'這回合已經深呼吸過了'});
@@ -988,7 +1275,7 @@ io.on('connection', (socket)=>{
   });
 
   // 拒絕加班：付 3💰 請假開溜（形態3 兩面張力——付不起就只能乖乖加班）
-  socket.on('refuseOvertime', (cb)=>{
+  on('refuseOvertime', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||(room.phase!=='admin'&&room.phase!=='choosing')) return cb&&cb({error:'現在不能請假'});
     const me=room.players.get(socket.data.playerId); if(!me||me.role!=='emp'||!me.alive) return cb&&cb({error:'不可用'});
     if(me._otRound!==room.round) return cb&&cb({error:'你沒有被要求加班'});
@@ -999,7 +1286,7 @@ io.on('connection', (socket)=>{
   });
 
   // 加班令：老闆行政階段打出手上的加班令
-  socket.on('orderOvertime', ({targetId}, cb)=>{
+  on('orderOvertime', ({targetId}, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return cb&&cb({error:'只有行政時間能派加班'});
     const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能要求加班'});
     const ci=b.hand.findIndex(c=>c.type==='overtime'); if(ci<0) return cb&&cb({error:'手上沒有加班令（去補給市場買）'});
@@ -1011,66 +1298,83 @@ io.on('connection', (socket)=>{
     cb&&cb({ok:true}); broadcast(room);
   });
 
-  socket.on('drawRoundCards', (cb)=>{
+  on('drawRoundCards', (cb)=>{
     const room=rooms.get(socket.data.roomCode), p=room?.players.get(socket.data.playerId);
     if(!room||!p||room.phase!=='admin'||p.role!=='emp'||!p.alive) return cb?.({error:'目前不能抽牌'});
     drawRoundHand(room,p);touch(room);cb?.({ok:true});broadcast(room);
   });
-  socket.on('practiceGhostPass', (cb)=>{
+  on('practiceGhostPass', (cb)=>{
     const room=rooms.get(socket.data.roomCode),p=room?.players.get(socket.data.playerId);
     if(!room?.solo||room.phase!=='choosing'||!p?.isGhost||p.id!==room.hostId)return cb?.({error:'目前不能略過幽靈行動'});
+    // 已經作祟過就不准覆蓋——否則 pass 會把剛送出的 haunt/warn/disrupt 吃掉（搞鬼王的事蹟跟著一起消失）
+    if(room.choices.ghost[p.id])return cb?.({error:'本回合已作祟過了'});
     room.choices.ghost[p.id]={type:'pass'};touch(room);tryResolve(room);broadcast(room);cb?.({ok:true});
   });
-  socket.on('practiceReady', (cb)=>{
+  on('practiceReady', (cb)=>{
     const room=rooms.get(socket.data.roomCode), p=room?.players.get(socket.data.playerId);
     if(!room?.solo||!p||p.id!==room.hostId||room.phase!=='admin')return cb?.({error:'目前不能開始選牌'});
     if(!room.adminReady)return cb?.({error:'老闆正在準備，請稍候'});
     if(p.alive&&p.role==='emp'&&p._drawnRound!==room.round)return cb?.({error:'先抽取本回合手牌'});
     touch(room);enterChoose(room);broadcast(room);cb?.({ok:true});
   });
-  socket.on('beginRound', (cb)=>{
+  on('beginRound', (cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='admin') return;
     const b=bossOf(room); if(!b||socket.data.playerId!==b.id) return cb&&cb({error:'只有老闆能開始本回合'});
     enterChoose(room); broadcast(room);
   });
 
-  socket.on('submitChoice', (payload, cb)=>{
+  on('submitChoice', (payload, cb)=>{
     const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=='choosing') return;
     const me=room.players.get(socket.data.playerId); if(!me) return;
     if(!me.alive){
       // 幽靈行動（不擋結算節奏；沒出就跳過）
       if(!me.isGhost) return;
       const ga=payload&&payload.ghostAction;
-      if(!ga||!GHOST_ACTIONS[ga.type]) return cb&&cb({error:'無效的幽靈行動'});
+      // hasKey 不是 GHOST_ACTIONS[ga.type]：`type:'__proto__'` 會拿到 Object.prototype（truthy）通過驗證，
+      // 然後在 choices.ghost 占住這回合的名額，讓幽靈連真的作祟都送不出去（實測 → 「本回合已作祟過了」）。
+      if(!ga||!hasKey(GHOST_ACTIONS,ga.type)) return cb&&cb({error:'無效的幽靈行動'});
       if(me.ghostCooldown>0) return cb&&cb({error:`幽靈行動冷卻中（還 ${me.ghostCooldown} 回）`});
       if(room.choices.ghost[me.id]) return cb&&cb({error:'本回合已作祟過了'});
+      let gtarget=null;
       if(ga.type==='warn'){
         const t=room.players.get(ga.targetId);
         if(!t||t.role!=='emp'||!t.alive) return cb&&cb({error:'報信對象無效'});
+        gtarget=t.id;                                     // 存驗證過的 pid，不存客戶端原值
       }
-      room.choices.ghost[me.id]={type:ga.type, targetId:ga.targetId||null};
+      room.choices.ghost[me.id]={type:ga.type, targetId:gtarget};
       cb&&cb({ok:true}); tryResolve(room); broadcast(room); return;
     }
     if(me.role==='boss'){
-      const picks=(payload.zones||[]).filter(z=>ZONES[z]&&z!=='office');
+      // zones 必須是「真的陣列」＋每個元素都是 ZONES 自己的字串鍵：
+      //   非陣列（Buffer/Map/Date…）以前會在 .filter 丟 TypeError（被 guard 接住回 500），現在直接退件；
+      //   元素是 ['tea']／Buffer('tea') 以前會通過 `ZONES[z]` 的隱式轉字串，然後原值被存進 choices → 巡查白巡。
+      const picks=(Array.isArray(payload.zones)?payload.zones:[]).filter(z=>isZoneKey(z)&&z!=='office');
       if(picks.length!==room.config.bossInspect) return cb&&cb({error:`請選 ${room.config.bossInspect} 個要查的地方`});
       for(const z of picks) if((room.zoneStreak[z]||0)>=2) return cb&&cb({error:`「${ZONES[z].name}」已連查兩回合`});
       // 緊盯（觀察 30/60%）：限巡查區之一、經費夠才收
+      // hasKey 不是 FOCUS_COST[bf.pct]：`pct:'__proto__'` 會拿到 Object.prototype（truthy）→ 通過驗證，
+      // 而且 `budget < Object.prototype` 是 false（NaN 比較），連經費檢查都繞得過。
       let focus=null; const bf=payload.focus;
-      if(bf&&bf.zone&&picks.includes(bf.zone)&&FOCUS_COST[bf.pct]){
+      if(bf&&bf.zone&&picks.includes(bf.zone)&&hasKey(FOCUS_COST,bf.pct)){
         if((me.budget||0)<FOCUS_COST[bf.pct]) return cb&&cb({error:`部門經費不足，盯不動（要 ${FOCUS_COST[bf.pct]}）`});
         focus={zone:bf.zone,pct:bf.pct};
       }
       room.choices.boss={zones:picks,focus};
     } else if(me.isSupervisor){
-      const zone=payload.inspectZone; if(zone&&(!ZONES[zone]||zone==='office')) return cb&&cb({error:'協查地點無效'});
+      // 沒選（null/undefined/''）＝不協查，維持原行為；有選就必須是真的摸魚區字串鍵
+      const zone=payload.inspectZone; if(zone&&!(isZoneKey(zone)&&zone!=='office')) return cb&&cb({error:'協查地點無效'});
       room.choices.emp[me.id]={action:'supervise', zone: zone||null};
     } else {
-      const action=payload.action; const helpTarget=payload.helpTarget||null;
+      // helpTarget 只收字串：結算時是 `room.players.has(ht)` 嚴格比對，非字串本來就永遠罩不到人，
+      // 但舊寫法會把客戶端送來的 Buffer／Map／函式原樣掛在 room.choices 上（實測 12 種型別全部存得進去）。
+      const action=payload.action; const helpTarget=(typeof payload.helpTarget==='string')?payload.helpTarget:null;
       const risky=!!payload.risky;
       let cardIdx=null, cardTarget=null;
       if(payload.cardIdx!=null){
-        const c=me.hand[payload.cardIdx];
+        // 必須是整數索引：`cardIdx:'__proto__'` 會讓 me.hand['__proto__'] 拿到 Object.prototype（truthy）
+        //   → 下一行 CARD_DEFS[undefined].kind 直接 TypeError（實測被 guard 接住回「伺服器內部錯誤」）；
+        //   `cardIdx:[0]` 則會把陣列原樣存進 choices。
+        const c=Number.isInteger(payload.cardIdx)?me.hand[payload.cardIdx]:null;
         if(!c) return cb&&cb({error:'沒有這張手牌'});
         if(CARD_DEFS[c.type].kind!=='item') return cb&&cb({error:'藉口卡不用出，被抓時會自動使用'});
         cardIdx=payload.cardIdx;
@@ -1083,7 +1387,7 @@ io.on('connection', (socket)=>{
       if(action==='work'||action==='idle') room.choices.emp[me.id]={action,zone:'office',helpTarget,cardIdx,cardTarget};
       else if(action==='slack'){ const zone=payload.zone;
         if(me._otRound===room.round) return cb&&cb({error:`🕘 你被要求加班，本回合不能摸魚！（可付 ${OT_REFUSE_COST}💰 請假開溜）`});
-        if(!ZONES[zone]||zone==='office') return cb&&cb({error:'請選一個摸魚區'});
+        if(!isZoneKey(zone)||zone==='office') return cb&&cb({error:'請選一個摸魚區'});
         if(me.lastZone===zone) return cb&&cb({error:`上回合已在「${ZONES[zone].name}」，換地方`});
         // 賭命衝刺限 gain≥2 的區（老鳥在低分區拼了=純懲罰，直接擋）
         if(risky){ const g=ZONES[zone].slack+(me.seniority==='senior'?-1:1); if(g<2) return cb&&cb({error:'這區報酬太低，不值得拼命（🎲限💰+2以上的區）'}); }
@@ -1099,11 +1403,11 @@ io.on('connection', (socket)=>{
     broadcast(room);
   });
 
-  socket.on('nextRound', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room||socket.data.playerId!==room.hostId||room.phase!=='reveal') return;
+  onNoAck('nextRound', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room||socket.data.playerId!==room.hostId||room.phase!=='reveal') return;
     if(room.revealSkipAt && Date.now()<room.revealSkipAt) return; // 前 5 秒不能跳
     advanceRound(room); broadcast(room); });
 
-  socket.on('restart', ()=>{
+  onNoAck('restart', ()=>{
     const room=rooms.get(socket.data.roomCode); if(!room||socket.data.playerId!==room.hostId) return;
     clearTimer(room); touch(room);
     for(const [id,p] of room.players) if(!p.connected) room.players.delete(id); // 再玩一局時剔除離線者
@@ -1114,7 +1418,7 @@ io.on('connection', (socket)=>{
   });
 
   // ---- 語音（WebRTC 信令；實際音訊走 P2P） ----
-  socket.on('voice-join', ()=>{
+  onNoAck('voice-join', ()=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return;
     const me=room.players.get(socket.data.playerId); if(!me) return; me.voiceOn=true;
     // 語音信令走 socket.id 路由（io.to 需要 socket room），與遊戲身分 playerId 分離
@@ -1122,10 +1426,11 @@ io.on('connection', (socket)=>{
     socket.emit('voice-peers', peers);                              // 我方主動 offer 這些既有語音者
     socket.to(room.code).emit('voice-joined', {id:socket.id, name:me.name});
   });
-  socket.on('voice-leave', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room) return; const me=room.players.get(socket.data.playerId); if(me) me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); });
-  socket.on('voice-signal', ({to,data})=>{ io.to(to).emit('voice-signal',{from:socket.id, data}); });
+  onNoAck('voice-leave', ()=>{ const room=rooms.get(socket.data.roomCode); if(!room) return; const me=room.players.get(socket.data.playerId); if(me) me.voiceOn=false; socket.to(room.code).emit('voice-left',{id:socket.id}); });
+  // ⚠️ voice-signal 的最後一個參數是 payload 不是 ack，一定要走 onNoAck（用 on 會把 payload 換成 no-op）
+  onNoAck('voice-signal', ({to,data})=>{ io.to(to).emit('voice-signal',{from:socket.id, data}); });
 
-  socket.on('disconnect', ()=>{
+  onNoAck('disconnect', ()=>{
     const sr=rooms.get(socket.data.specCode); if(sr&&sr.spectators) sr.spectators.delete(socket.id);
     const room=rooms.get(socket.data.roomCode); if(!room) return;
     const me=room.players.get(socket.data.playerId);
