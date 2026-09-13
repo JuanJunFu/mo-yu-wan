@@ -3,3 +3,6 @@ certs/
 *.pem
 package-lock.json
 .gstack/
+
+# 團隊協作紀錄：文件進版控，驗證截圖不進（一次上百 MB）
+.team/*/evidence-*/

@@ -1,0 +1,114 @@
+VERDICT: FAIL
+
+BLOCKING:
+- [server.js:1011] `isPayloadObject()` 只排除 `null` 與陣列，並非「純物件」檢查；`Buffer`／TypedArray 仍會通過。我用目前的真 `guardHandlers` 與 handler 實測：`createRoom(Buffer)` 成功建房，`setPassword(Buffer)` 把 `1234` 清成 `null`；專案的 `socket.io-parser` encode/decode 後也確認 payload 在伺服器端仍是 `Buffer`。因此 B3 的「畸形 payload 零副作用」尚未成立。→ 改成跨 realm 可用的 plain-object/prototype 檢查，至少明確排除 `ArrayBuffer`、`ArrayBufferView`、`Buffer` 與其他非 POJO，並把它們加入回歸測試。 [信心 10/10]
+
+NIT:
+- [server.js:308] B4 採整房共用延長：只有猝死玩家會播放額外畫面，但其他玩家也會多讀／等 2.9 秒。這是實作取捨，不是任務書明訂，合理但應由產品負責人知情。
+- [tests/card-flow.test.cjs:57] 跨檔 regex 能 fail loud，但對排版敏感且存在假綠；長期更適合共享時序資料或測實際控制流程。
+- [server.js:1020] `startGame` 雖在空 payload 白名單，但 `socket.emit('startGame', ack)` 會把 callback 留在 payload 位而被退件；目前前端固定傳物件，所以不是現行回歸。
+
+七個重點問題逐條回答:
+
+1.  
+   (a) 放寬到 14 秒合理，但正常可達最壞值其實是 12.8 秒，因此正常最長揭曉頁是約 27.8 秒，不是 29 秒；29 秒是硬上限允許的異常／防呆邊界。[server.js:295-311]
+
+   (b) 12,800ms 算式正確：
+
+   - 最多 5 名員工，所以 `n≤5`。[server.js:295]
+   - 設既有幽靈數為 `d`，則 `d+n≤5`；每隻幽靈至多一則、每名存活員工至多一張道具、老闆緊盯至多一則，所以 `g≤d+n+1≤6`。[server.js:326-372]
+   - 前端基礎演出為 `3800 + n×480 + g×350 + danger×1600`。[public/index.html:835-882]
+   - 猝死額外為 `3600−700=2900`。[public/focus.js:50-80]
+   - `3800 + 5×480 + 6×350 + 1600 + 2900 = 12800`。
+
+   我也直接呼叫目前的 `revealAnimMs()`，輸出為 `{"worstRevealMs":12800,"cap":14000}`。
+
+   (c) 依目前規則生成的 `lastReveal` 不會超過 12,800ms，因此不會因 14,000ms cap 被截頂。[server.js:303-311] 不過真實牆鐘時間仍可能因網路延遲、背景分頁 timer throttling 或新裝置中途重連而較晚；前端目前自行從收到 state 的時間計算 `revAnimEndsAt`，沒有使用 server 傳出的 `revealAnimMs`。[server.js:159] [public/index.html:882] 這是執行環境漂移，不是正常局面超過 cap；未做真瀏覽器延遲驗證，信心 8/10。
+
+2.  
+   (a) fail-loud 值得保留：它至少能攔住「只改 server 或只改前端數字」的漂移，較輪次 1 的硬編碼鏡像有實質進步。[tests/card-flow.test.cjs:36-68]
+
+   (b) regex 不夠穩，也有假綠：
+
+   - 題目舉的 `KAROSHI_MS = 3600` 加空白其實不會失敗，因 regex 使用 `\s*`。[tests/card-flow.test.cjs:66]
+   - `let t = 500 + n * 140` 則會失敗，因該 regex 要求緊密格式。[tests/card-flow.test.cjs:57]
+   - 我做了記憶體內變異：把舊公式留在註解、真正公式改寫，regex 仍抓到註解中的 `500/140`。
+   - 把前端真正的 `return start+KAROSHI_MS` 改成少 1000ms，測試解析結果仍是 2900，因它只解析常數與 lead，完全沒驗證 return 控制流。[public/focus.js:73-80] [tests/card-flow.test.cjs:64-68]
+
+   結論：目前適合當漂移警報，但不能當完整前端行為證明。
+
+3. B4 的整房順延在共享 phase／共享 server timer 架構下是簡單且一致的選擇。[server.js:308-311] 猝死玩家可得到完整 15 秒閱讀期；其他玩家則在基礎演出結束後約有 17.9 秒閱讀期，因他們不會播放 `playKaroshi()`。[public/focus.js:60-62] 我判定可接受、非 blocking，但確實是任務書外的產品取捨。
+
+4. 目前前端沒有正當請求會被新檢查誤殺，但 B3 仍會錯誤接受二進位畸形 payload。
+
+   我實際掃到 34 個 `sock.emit` 呼叫點、28 個唯一事件，不是題述的 30 個呼叫點。15 個 payload-bearing 事件全部傳物件字面量，例如開房／加入／開局／選擇。[public/index.html:494-514] [public/index.html:530-567] [public/index.html:651-698] [public/index.html:986-999] [public/index.html:1029]
+
+   - `voice-signal` 以 `onNoAck` 註冊且合法呼叫傳 `{to,data}`；畸形值會靜默丟棄。[server.js:1388-1389]
+   - `disconnect` handler 宣告零參數，所以 Socket.IO 傳入的 reason 字串不會被視為 payload，handler 仍會執行。[server.js:1391-1408]
+   - bot 沒有模擬 socket client；它們直接寫入 `room.choices`。[server.js:950-971]
+   - `startGame(null, ack)` 與完全不給參數可通過白名單；目前 UI 傳完整物件。[server.js:1009-1027] [public/index.html:554]
+   - 但 `Buffer` 仍通過 [server.js:1011]，並在解構後觸發預設值與副作用。[server.js:1043-1058] [server.js:1135-1142]
+
+5. B5 新欄位沒有弄壞 `buildStory`。
+
+   - `chron()` 的上限仍是 `<200`；我另外推入 205 筆，結果長度為 200。[server.js:123]
+   - ghost 事件新增 `pid/detail/targetPid`，shield 四分支保留既有 `kind/name/detail` 並只增加 `pid`。[server.js:343] [server.js:437-440]
+   - 命中現在確實比對 `kind==='warned'`、同回合與同 `playerId`，任一邊缺 ID 都不命中。[server.js:618-624]
+   - `buildStory` 對 shield 只讀 `kind/name/detail`，對 ghost 只讀 `kind/name/detail`。[server.js:662-687]
+   - 全專案搜尋沒有發現對 chronicle 事件做 key 數量或固定 object shape 的假設。
+
+   結論：B5 修正正確，200 筆上限及既有故事讀取路徑未受破壞。
+
+6. 實作者對 shorthand 覆蓋的判斷正確。
+
+   inline base `.bzone` 原有 `transition:box-shadow .3s,border-color .3s`。[public/index.html:166] `focus.css` 在頁尾較晚載入。[public/index.html:1037-1042] 新規則選擇器 `.focus-game .reveal-board-pane .bzone` 特異性也更高，所以其 `transition` 會整組取代 base 值；把 `box-shadow` 與 `border-color` 寫回去是必要的。[public/focus.css:158]
+
+7. 實作者所說「既有 reduced-motion 缂口」不正確，但結果反而是安全的。
+
+   `cards.css` 已有全域：
+
+   `@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}`
+
+   [public/cards.css:18]
+
+   它雖早於 `focus.css` 載入，但帶 `!important`，會壓過 B7 非 important 的 transition。[public/index.html:1037-1042] 因此新的 `min-height` transition 和既有 box-shadow／border-color transition 都會被排除；不構成 blocking。[public/focus.css:158]
+
+硬性不變量驗證結果:
+
+- `checkWin`：執行  
+  `diff -u <(git show HEAD:server.js | sed -n '/^function checkWin(room){/,/^}$/p') <(sed -n '/^function checkWin(room){/,/^}$/p' server.js)`  
+  無輸出，逐字 0 差異。[server.js:525-535]
+- 六常數：腳本逐一比較 HEAD／WORK，結果均相同：`REVEAL_SEC=15`、`REVEAL_MIN_SKIP=5`、`ADMIN_SEC=45`、`CHOOSE_SEC=45`、`TASK_DEADLINE=3`、`PROMOTE_COOLDOWN=3`。[server.js:27-31]
+- `grep -o '!important' public/focus.css | wc -l` → `10`。
+- `grep -o '!important' public/cards.css | wc -l` → `3`。
+- `node --test tests/card-flow.test.cjs` → `tests 36 / pass 36 / fail 0`。[tests/card-flow.test.cjs:1]
+- handler 分類：`rg -c '^  on\\(' server.js` → `22`；`rg -c '^  onNoAck\\(' server.js` → `7`。[server.js:1039-1408]
+- 另將 HEAD 與工作區事件名稱排序比較：兩邊均為 29 個，`added []`、`removed []`；沒有新增 socket action。
+- `submitChoice` 接受的玩家 action 仍是 `work`／`idle`／`slack`／主管 `supervise`，幽靈 action 表也未增加。[server.js:103] [server.js:1299-1357]
+- 已按指示不把單人 4／多人 6 回合及第一局隱藏商店判為 blocking。
+- `git diff --check` 無輸出。
+- 最終 `git status --short` 與開始完全一致：原有 8 個項目仍為 7 個 modified 檔、測試檔 modified，加 `.team/` 未追蹤；repo 內未新增或修改任何審查檔案。
+
+測試品質評估:
+
+(a) 新測試不是單純演戲，但證據強度不一。
+
+- B5 最強：fixture 測精確歸屬，再由真 `resolveRound` 產生 chronicle，最後一路驗到搞鬼王 holder／deed。[tests/card-flow.test.cjs:324-380]
+- B3 對列出的 `null/undefined/string/number/boolean/array` 確實驗了 ack、世界快照與零副作用，比原本 `doesNotThrow` 強很多。[tests/card-flow.test.cjs:534-579]
+- B4 已驗到 server timer、skip lock 及真引擎猝死結果，但前端部分仍是原始碼數字解析，不是實際 DOM／timer 控制流。[tests/card-flow.test.cjs:159-223]
+- 突變結果證明「對那些特定變異敏感」，不能證明所有語意錯誤都會被抓到。
+
+(b) 修改既有搞鬼王 fixture 不算「改測試遷就實作」。
+
+schema 本來就為 B5 正式增加 `targetPid/pid`，[server.js:343] [server.js:437-440]；fixture 更新成新 schema 是合理維護。更重要的是另有真引擎測試從 `resolveRound` 產生欄位並做端到端王冠驗證，已打破純 fixture 自我循環。[tests/card-flow.test.cjs:354-380]
+
+仍有部分自我循環：B4 測試把「哪些前端數字代表總時長」這項實作假設寫進 regex helper；最壞 `n=5/g=6` 也是人工 fixture，沒有用真引擎建出最壞局。[tests/card-flow.test.cjs:47-68] [tests/card-flow.test.cjs:174-178]
+
+(c) 關鍵未覆蓋項目：
+
+- B3 沒測 `Buffer`、TypedArray、ArrayBuffer 或其他非 POJO；這正是本輪 blocking。[tests/card-flow.test.cjs:537]
+- B4 沒有真瀏覽器驗證 `playReveal → playKaroshi → revealSummary` 的實際控制流，也沒有背景分頁、網路延遲或中途重連案例。[public/focus.js:58-91]
+- regex 沒驗證 `playKaroshi()` 的 return 式與呼叫是否仍存在。[public/focus.js:80-86]
+- B7 沒有 computed-style／動畫取樣／reduced-motion 自動測試；目前只能從 CSS 層疊與既有人工取樣判定。[public/focus.css:158]
+- 正式測試沒有 200 筆 chronicle cap 案例；本輪只有我用 `/tmp` 探針獨立確認。[server.js:123]
+- 除題目已揭露的猝死喜劇效果、四類卡面辨識與完整整局體感外，我沒有發現其他已宣稱完成、但完全缺乏任何靜態或測試證據的主要項目。

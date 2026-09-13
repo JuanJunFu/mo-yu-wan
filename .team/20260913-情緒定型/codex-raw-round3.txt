@@ -1,0 +1,75 @@
+VERDICT: FAIL
+
+BLOCKING:
+- [server.js:1326]／[server.js:1337]／[server.js:1355] payload 只驗外層 POJO，區域欄位卻透過 `ZONES[value]` 強制轉字串驗證，再把原始陣列／Buffer 寫入 choice；[server.js:364]／[server.js:426] 結算改用 `Set` 嚴格同一性。我用真 `guardHandlers`＋真 `submitChoice` 實測：正常 `'tea'` 被抓；`['tea']`、`Buffer.from('tea')` 都回 `{ok:true}` 且成功摸魚、避開同一個 `'tea'` 巡查。老闆 `zones:[Buffer('tea'),'copy']` 與主管 `inspectZone:Buffer('tea')` 也同樣無法抓到茶水間玩家。Buffer 還進入 `lastReveal`，廣播被編碼成額外 binary attachments。→ 對每個欄位做事件級 schema／canonicalization：區域必須是 primitive string 且 `Object.hasOwn(ZONES, zone)`；`zones` 必須是合法字串陣列；寫入狀態前只保留正規化值，並補三種角色的實際結算回歸測試。 [信心 10/10]
+- [server.js:1357] `ZONES[zone]` 沒檢查 own property，`zone:'__proto__'` 也會通過。老鳥實測後 `points/anxiety` 變成 `NaN`；菜鳥則先收到 `{ok:true}`，隨後在 [server.js:427] 對 `Object.prototype` 做迭代而 throw，timer 已被清除、壞 choice 留在房間，phase 卡在 `choosing`。→ 使用 `Object.hasOwn` 並拒絕所有非合法 primitive zone；不得在 `tryResolve` 成功前先回成功 ack。 [信心 10/10]
+- [server.js:230] `startGame` 未驗證巢狀 `opts.rounds`：`{rounds:{}}`、`{rounds:[]}`、巢狀 Buffer／TypedArray 都回 `{ok:true}` 且原樣存進 `room.config.rounds`；[server.js:528] 隨後靠數值強制轉型判斷終局。`{}` 會讓回合上限永遠無法命中，`[]` 會在第一回合即命中，Buffer 還被廣播成 binary state。→ `rounds` 必須驗證為有限整數及允許範圍，其他 start options 也應逐欄驗 enum／primitive 型別。 [信心 10/10]
+- [tests/card-flow.test.cjs:113] C4-2 已執行真函式控制流，但 `KAROSHI_MS` 仍用 regex 取全檔第一個匹配。我在 `/tmp` 把前端改成 `/* 舊值備查：const KAROSHI_MS=3600; */` 加真正的 `const KAROSHI_MS=5000;`，server 保持 3600，結果仍是 **39/39 全綠**。這正是宣稱已排除的「舊值留在註解造成假綠」。→ 用 comment-aware 掃描器擷取真正宣告，或採共享時序資料源；新增此突變回歸。 [信心 10/10]
+
+NIT:
+- [tests/card-flow.test.cjs:86] 假 DOM 不支援未來的 `requestAnimationFrame`／`animate()` 時直接紅，是合理的 fail-loud。被後續寫手隨手放寬屬流程治理風險；目前檔頭警告已算清楚。
+- [tests/card-flow.test.cjs:49] `cutFunction` 本身確實不理解 regex 字面值；目前四個目標函式沒有 regex，而且現有字串、樣板字面值、註解與巢狀大括號均成功切出、解析並執行。現況非 blocking。
+- [tests/card-flow.test.cjs:281] n≤5、g≤8 是手寫邊界；[tests/card-flow.test.cjs:291] 又只斷言 `checked>=180`，即使漏掉最多九組仍可能綠。建議建立 `MAX_PLAYERS` 共用常數、由它推導 n/g，並斷言精確 `189`。目前可達範圍仍被覆蓋，屬 nit。
+- [server.js:1019] class instance在同一 realm 直接呼叫時會通過；預設 Socket.IO parser 會把它還原成 POJO，因此目前不是可遠端利用問題。若更換 parser／reviver 必須重審。
+
+六個殘留風險逐條結論:
+1. **有 blocking。**  
+   我先用真 wrapper 重跑頂層攻擊：`createRoom(Buffer)` 房數 1→1、`setPassword(Buffer)` 密碼仍為 `1234`、主管 `submitChoice(Buffer)` choices 仍 `{}`，三者都回 `無效請求`；B3-2 的頂層修正正確。[server.js:1016]  
+   但巢狀測試推翻寫手宣稱：
+
+   - `{action:'slack',zone:['tea']}`／巢狀 Buffer 都避開 `'tea'` 巡查。[server.js:1355] [server.js:426]
+   - 老闆與主管的巢狀 Buffer 區域也能避開抓人。[server.js:1326] [server.js:1337]
+   - `{rounds:{}}`、陣列、Buffer／TypedArray 會污染 room config。[server.js:230]
+   - `zone:'__proto__'` 能造成 `NaN` 或同步例外後房間卡住。[server.js:1357] [server.js:427]
+   - 可傳輸的普通物件／陣列沒有在 JSON 序列化時直接爆掉；Buffer 則確實變成 binary state attachments。真正的 crash 路徑是 `__proto__` 驗證繞過。
+
+2. **fail-loud 是正確行為，維護治理是風險。**  
+   [tests/card-flow.test.cjs:81] 的 stub 若不支援新 API，測試會明確 throw，不會假綠。後續維護者必須增加等價時鐘攔截，不能刪除行為驗證。未發現目前 stub 偷吞錯誤。
+
+3. **目前四個函式切取正確，但限制屬實。**  
+   我逐一檢查 [public/index.html:798]、[public/index.html:815]、[public/focus.js:58]、[public/focus.js:82]：沒有 regex 字面值；存在字串、樣板、註解與 arrow callback 大括號，掃描器均成功切出並在 189 組執行。  
+   但 [tests/card-flow.test.cjs:113] 的 `KAROSHI_MS` 不是經 `cutFunction`，仍是 regex；我已實證註解可造成 39/39 假綠，列為 blocking。
+
+4. **目前 Socket.IO 傳不回 class instance，寫手判斷成立。**  
+   專案使用預設 parser。[server.js:12] 我用專案 `socket.io-parser@4.2.7` 對有／無 Buffer 欄位的兩種 class 做 encode→decode，兩者都變成 `constructor=Object`、`prototype===Object.prototype`、method 消失；巢狀 Buffer 本身仍保留。原因是 parser 將 enumerable 欄位複製到新 `{}`，再由 JSON parser 還原。[node_modules/socket.io-parser/build/cjs/binary.js:27]  
+   因此 class bypass 目前只存在直接本機呼叫，不是網路攻擊面；換 parser 時需重審。
+
+5. **現況是 nit。**  
+   我重新計算迴圈實際執行 **189 組**；目前房間上限仍是六人。[server.js:1074] [server.js:1101] g≤8 也超過現行可達最大值 6。問題是上限沒有共用來源，且測試只要求 ≥180。[tests/card-flow.test.cjs:281] [tests/card-flow.test.cjs:291] 房間上限將來改大時不會自動跟進。
+
+6. **外層 `Object.create(null)` 本身安全。**  
+   [server.js:1052] 至 [server.js:1398] 的 payload handlers 都是解構或讀欄位，沒有對外層 payload 呼叫 `.hasOwnProperty()`／`.toString()`／其他 prototype method。  
+   我把 `Object.create(null)` 送過全部 15 個 payload-bearing handlers，捕獲例外均為 0；`createRoom`、`createSolo`、`setPassword`、`startGame` 行為與 `{}` 相同，其餘正常拒絕或無動作。跨 realm `{}` 也正常放行。
+
+硬性不變量驗證結果:
+- `diff -u <(git show HEAD:server.js | sed -n '/^function checkWin(room){/,/^}$/p') <(...)` → 無輸出，0 差異；兩邊 SHA-256 都是 `96cf2c2068d35819cf893e617ea2159f83f1411b34c47528f3f0b1cee528037a`。[server.js:525]
+- 六常數 HEAD／WORK 實際輸出完全相同：
+  - `REVEAL_SEC=15`
+  - `REVEAL_MIN_SKIP=5`
+  - `ADMIN_SEC=45`
+  - `CHOOSE_SEC=45`
+  - `TASK_DEADLINE=3`
+  - `PROMOTE_COOLDOWN=3`  
+  [server.js:27] [server.js:31]
+- `grep -o '!important' public/focus.css | wc -l` → `10`。
+- `grep -o '!important' public/cards.css | wc -l` → `3`。
+- `node --test tests/card-flow.test.cjs` → `tests 39 / pass 39 / fail 0 / duration_ms 311.652917`。
+- `grep -cE '^  on\\(' server.js` → `22`。
+- `grep -cE '^  onNoAck\\(' server.js` → `7`。
+- HEAD／WORK 事件名排序後 `diff -u` → 無輸出，共 29 個，與輪次 1 表相同，沒有新增 socket action。[server.js:1048]
+- HEAD／WORK 的玩家 action 比較皆為 `idle, slack, work`；主管 `supervise` 仍是既有內部 sentinel，幽靈 action 表未增加。[server.js:103] [server.js:1354]
+- `checkWin` 零差異，三王只產生頭銜／故事，未新增勝負規則。人類裁決的 solo 4／多人 6 與第一局隱藏市場依指示不列阻擋。
+- `git diff --check` → 無輸出。
+- `node --check server.js public/focus.js public/screen.js public/cards.js` → 全部通過。
+- 最終 `git status --short` 與開始完全一致：原有八個 modified 檔與未追蹤 `.team/`；HEAD 仍為 `0fb7f221bfb1e1d302371252c0fc531655ab522d`。本次未修改 repo。
+
+寫手自我宣稱複驗:
+- `node mutate.js`：我先在 scratch baseline 跑到 39/39，再跑 15 個突變；輸出全部變紅，失敗數依序為 `5,5,3,3,3,3,3,5,4,5,3,3,1,1,4`，宣稱的 15/15 成立。
+- `node oldvsnew.js`：基準皆為 `4760 / 7660`；舊 regex 六個突變中四個假綠，新 harness 對腳本列出的六個全部抓到，宣稱成立。
+- 腳本可信度：scratch 的 `server.js`／`index.html`／`focus.js` SHA-256 與工作區相同，測試檔 hash 也相同；`mutate.js` 找不到替換目標會直接 exit 2，逐次跑真 `node --test` 並在結尾還原。沒有發現突變未套用或比對條件刻意放水。
+- 但它們只證明列出的突變。我新增「註解保留舊 `KAROSHI_MS`、真正常數改值」後，39/39 仍綠，證明 C4-2 仍有未列入腳本的假綠。[tests/card-flow.test.cjs:113]
+
+未解事項:
+- **仍沒有完整瀏覽器實機驗證。** [public/focus.js:58] 的猝死演出是否荒謬好笑、[public/focus.js:98] 的四類卡面能否不讀字辨識、整局節奏與玩家是否真的親眼看見／理解結果，本輪均未驗證。
+- VM/fake DOM 只證明排程控制流與毫秒數，不證明真瀏覽器的 layout、動畫、背景分頁 throttling、重連或整局體感。[tests/card-flow.test.cjs:81]
+- 上述視覺與整局體感需人工確認；「此驗收缺口仍存在」信心 10/10，實際演出品質未評分。

@@ -1,0 +1,137 @@
+VERDICT: FAIL
+
+BLOCKING:
+- [server.js:230](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/server.js:230) 預設局數從「3 人以下 6 回合、其他 8 回合」改成「單人 4、多人 6」。這是直接改變勝負何時結算的遊戲規則，違反「不加規則，只加情緒」→ 還原原本局數邏輯，另開規則變更任務處理。[信心 10/10]
+- [public/focus.js:13](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.js:13) 首局用 `localStorage` 隱藏補給商店；[public/focus.css:7](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.css:7) 同時把原本 `#marketbox` 隱藏。新玩家因此第一局少一組可用操作，這不是純顯示層，而是依裝置歷史改變可玩的選項 → 首局也提供商店入口；若要簡化教學，只降視覺權重，不要移除功能。[信心 10/10]
+- [server.js:991](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/server.js:991) 全域把 `null`/`undefined` payload 轉成 `{}` 產生實際狀態變更。我實跑得到：`createRoom(null)` 成功建房、`setPassword(null)` 清除密碼、主管 `submitChoice(null)` 成功提交「不協查」並觸發揭曉。寫手宣稱「不會產生不同遊戲結果」是錯的 → 缺少必要 payload 時應直接回 `{error:'無效請求'}`；只對明確允許空物件的 handler 使用預設值。[信心 10/10]
+- [server.js:293](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/server.js:293)、[public/focus.js:73](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.js:73) server 公式只涵蓋 `playReveal()`，但本批的過勞死 act 從 `revAnimEndsAt-700` 開始再播 3600ms，因此真正 act 比公式多 2900ms。`multiplayer reveal timer starts…after animation` 的宣稱在過勞死回合不成立 → 將這 2900ms 納入 server 的最大演出時間，或把過勞死演出收進既有 `revAnimEndsAt`。[信心 10/10]
+- [server.js:603](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/server.js:603) 搞鬼王把「同回合任何 `warned` shield」算成該幽靈報信命中，沒有核對報信目標。我構造兩隻鬼同回合報不同玩家、只有第二隻真的救到人的案例，程式仍把第一隻列為「命中」並頒王 → chronicle 記錄 target/player ID，按同一幽靈行動及同一目標精確配對。[信心 9/10]
+- [public/index.html:103](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/index.html:103)、[public/cards.css:2](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/cards.css:2) `#endbanner` 仍使用 `color:var(--wood2)`；實際是 `#ece3c8`，背景是 `#f4eddc`，對比僅 1.10:1。最重要的「老闆／員工獲勝」標題近乎隱形，色碼陷阱尚未清完 → 改用深色 `#4a2c14`（約 10.83:1）或修正 token scope。[信心 10/10]
+- [public/focus.css:143](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.css:143)、[public/focus.css:146](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.css:146) 空區初始高度是 42px；加上 `.inspected` 後立刻回到 84px，且 `min-height` 沒有 transition。手機單欄必定造成約 42px 的同步 reflow；桌面則取決於同行另一區高度 → 在動畫開始前先保留巡查區高度，另用獨立 class 啟動聚光效果。[信心 8/10；視覺體感強度需人工確認]
+- [public/index.html:687](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/index.html:687)、[public/index.html:923](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/index.html:923) 玩家名稱被放進 inline `onclick`，但 `esc()` 不處理引號。12 字元名稱 `'))top.x=1//` 可形成有效 JavaScript，房主點「資遣」時執行。這是 HEAD 已存在的漏洞，不是本批新增，但目前版本仍不安全 → 移除 inline handler，使用 `addEventListener` 和閉包／安全 `data-*` ID。[信心 10/10]
+
+NIT:
+- [public/focus.js:31](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.js:31) `.rev-head` 契約沒有 assert/null guard；DOM 改動後可能直接 throw，或只搬走 `revtitle` 而把旁白留在原處。
+- [public/focus.css:10](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.css:10) 多組新增小字未達 4.5:1：`.versus` 2.68:1、金色結果 3.02:1、`#revtitle` 3.82:1、`.rr-where` 3.90:1。
+- [server.js:1133](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/server.js:1133) 多個正常驗證早退仍不回 ack；wrapper 只保證「同步例外」有錯誤 ack，不能保證每條拒絕路徑都有回覆。
+- [server.js:1355](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/server.js:1355) `voice-signal` 未驗證 `to` 是同房語音 peer。socket ID 不易猜，但仍應限制跨房信令。
+- [tests/card-flow.test.cjs:90](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/tests/card-flow.test.cjs:90) 所謂跨檔鏡像測試只把 server 公式再手寫一次，沒有讀取或執行前端時序，無法抓到跨檔漂移。
+
+清單 1~7 逐條結論（每條給「通過／有問題」＋理由＋你實際看到的程式碼證據）:
+
+1. **有問題。**
+
+   - `playReveal()` 本身的計算為：
+     - 初始：`500 + n*140`
+     - 跑馬燈：`g*350 + 300`
+     - 手電筒：`1100`
+     - 個人結果：`n*220 + 700 + danger*1600`
+     - 總結與尾巴：`n*120 + 1200`
+     - 合計確實是 `3800 + n*480 + g*350 + danger*1600`，與 `revealAnimMs()` 逐項一致。
+   - `n` 兩端都是未過濾的 `r/rv.results.length`；`g` 都是 `ghostNotes.length`；危險判定也都是 zone 命中 boss/supervisor 且 `!supervisor`。這部分通過。
+   - 但 [public/focus.js:73-86](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.js:73) 又延長過勞死 act 2900ms，server 不知道這段，因此完整兩段式舞台已失準。
+   - 現行最多 6 玩家，`n≤5`；即使用寬鬆上界 `g≤6`，公式最高約 9900ms，不會撞 12000。假設 8 人總局、`n=7,g=8,danger=true` 是 11560ms；再更大的異常資料才會截頂。截頂時 server 會比前端提早進入 15 秒讀取期。
+   - `room.revealAnimMs` 只被傳到 view，前端沒有讀；真正影響在 `startTimer(animMs/1000+REVEAL_SEC)` 和 `revealSkipAt`。它不改分數／心悸／出局計算，但確實控制 `advanceRound()` 的時間及 `nextRound` gate，因此不是「完全不進狀態轉移條件」，只是只改變轉移時間、不改勝負公式。
+
+2. **通過分類；wrapper 還有邊界。**
+
+| event | 註冊 | handler 宣告 | `fn.length` | 最後參數實際為 ack | 結論 |
+|---|---|---|---:|---|---|
+| createRoom | on | `({…}, cb)` | 2 | 是 | 正確 |
+| createSolo | on | `({…}, cb)` | 2 | 是 | 正確 |
+| joinRoom | on | `({…}, cb)` | 2 | 是 | 正確 |
+| rejoin | on | `({…}, cb)` | 2 | 是 | 正確 |
+| listRooms | on | `(cb)` | 1 | 是 | 正確 |
+| spectateRoom | on | `({…}, cb)` | 2 | 是 | 正確 |
+| specLeave | onNoAck | `()` | 0 | 否 | 正確 |
+| setPassword | on | `({password}, cb)` | 2 | 是 | 正確 |
+| closeRoom | on | `(cb)` | 1 | 是 | 正確 |
+| makeQR | on | `({text}, cb)` | 2 | 是 | 正確 |
+| startGame | on | `(opts, cb)` | 2 | 是 | 正確 |
+| assignTask | on | `({targetId}, cb)` | 2 | 是 | 正確 |
+| promote | on | `({targetId}, cb)` | 2 | 是 | 正確 |
+| fire | on | `({targetId}, cb)` | 2 | 是 | 正確 |
+| buyCard | on | `({idx}, cb)` | 2 | 是 | 正確 |
+| breathe | on | `(cb)` | 1 | 是 | 正確 |
+| refuseOvertime | on | `(cb)` | 1 | 是 | 正確 |
+| orderOvertime | on | `({targetId}, cb)` | 2 | 是 | 正確 |
+| drawRoundCards | on | `(cb)` | 1 | 是 | 正確 |
+| practiceGhostPass | on | `(cb)` | 1 | 是 | 正確 |
+| practiceReady | on | `(cb)` | 1 | 是 | 正確 |
+| beginRound | on | `(cb)` | 1 | 是 | 正確 |
+| submitChoice | on | `(payload, cb)` | 2 | 是 | 正確 |
+| nextRound | onNoAck | `()` | 0 | 否 | 正確 |
+| restart | onNoAck | `()` | 0 | 否 | 正確 |
+| voice-join | onNoAck | `()` | 0 | 否 | 正確 |
+| voice-leave | onNoAck | `()` | 0 | 否 | 正確 |
+| voice-signal | onNoAck | `({to,data})` | 1 | 否，唯一參數是 payload | 正確 |
+| disconnect | onNoAck | `()` | 0 | 否 | 正確 |
+
+   `voice-signal` 分類正確。現有 handler 都沒有 default/rest，解構與 arrow function 本身不會破壞 `fn.length`；但未來加 default/rest 就會誤判。同步例外會在 [server.js:998](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/server.js:998) 回錯誤 ack，不會因 wrapper 吞錯而永久等；非例外的無 ack 早退與非同步 callback 例外仍不在保證範圍。
+
+3. **有問題。**
+
+   我逐一核對 payload handler。真正改變控制流／狀態的是：
+
+   - `createRoom(null/undefined)` → 現在建立預設房間。
+   - `createSolo(null/undefined)` → 現在建立並啟動單人局。
+   - `setPassword(null/undefined)` → 房主現在會解除密碼。
+   - 主管 `submitChoice(null/undefined)` → 現在提交 `{action:'supervise',zone:null}`，且可能立刻結算。
+   - `voice-signal(null/undefined)` → 從原本 throw 改成向 `undefined` target 呼叫 emit。
+
+   `startGame(null)` 原本已有 `opts||{}`，行為等價；join/rejoin/spectate/makeQR/assign/promote/fire/buy/orderOvertime 會落入錯誤分支；一般員工與幽靈的空 `submitChoice` 也不會取得有效動作。沒有發現藉此繞過冷卻或多拿分數，但主管提交與房間／密碼操作已足以推翻寫手宣稱。
+
+4. **有問題。**
+
+   目前 DOM 通過：`#revtitle`、`#skiprev`、`#actnarr` 都是 `.rev-head` 的直接子節點，所以搬動 parent 時旁白一起走。但程式沒有檢查 `revtitle` 存在，也沒有驗證 `actnarr.parentElement === revtitle.parentElement`；未來拆 DOM 會 crash 或靜默留下旁白。
+
+5. **有問題。**
+
+   `.bzone` 預設 84px，空且未巡查時縮為 42px；第④拍加 `.inspected` 後立即失去縮高規則。`transition` 只涵蓋原始 `.bzone` 的 `box-shadow`/`border-color`，沒有 `min-height`。手機單欄必然推動下面所有區塊。沒有 `@supports selector(:has(*))` fallback；不支援 `:has()` 時基本內容仍存在、盒子維持 84px，但空區縮排、未巡區壓暗與「老闆撲空」訊息會消失。本輪沒有可用的真實 `/browse` 實機環境，未做肉眼錄影驗證。
+
+6. **有問題。**
+
+   新增樣式沒有再直接使用 `var(--wood2)` 當前景，首頁 slogan 也已改成深色；但既有 `.banner` 漏網，造成終局勝方標題 1.10:1。其他實算結果包括：
+
+   - `.act-narr` `#4a2c14` / `#f2e7cf`：10.30:1，通過。
+   - `.home-slogan` `#4a2c14` / `#f4eddc`：10.83:1，通過。
+   - `.result-roster .gold`：3.02:1，小字不通過。
+   - `.versus`：2.68:1，不通過。
+   - `#revtitle`：3.82:1，不通過。
+   - `.cf-buff .cf-kind`：約 4.20:1，10px 小字不通過。
+   - `.kcard .ksub`：約 4.00:1，小字不通過。
+
+7. **通過主要流程，但 key 設計仍脆弱。**
+
+   - restart：server 先廣播 `phase='lobby',round=0`；[public/focus.js:282](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/public/focus.js:282) 在 lobby 清空 session key、`revealStageKey`、`revAnimKey`。Socket.IO 同連線有序，因此目前新局第一回合不會被舊 `code:1` 吞掉。
+   - 跳過：override 先執行原 `skipReveal()` 補完動畫 DOM，再呼叫 `revealSummary()`；`focusResult` 在同一次 `paintPersonalResult()` 尾端建立並套 stage，個人總結會出現。
+   - key 僅為 `房號:回合`。重複廣播、重連、重整可正確去重；但缺 game/session nonce，若未來加入「不經 lobby 直接重開」或相同房號直接換局，會碰撞。現在所有同房 restart 路徑都有 lobby 廣播，所以尚未實際失效。
+
+硬性不變量驗證結果（逐條，附你實際跑的指令與輸出）:
+
+- `checkWin` 逐字一致：以 Node 抽取 HEAD/current 函式並比較。
+  - `base_len=619 cur_len=619 equal=true`
+  - 兩邊 SHA-256 都是 `5e3b30f12fed7ec02a756545e3aab8d7e306491ad6f075bc5bc4d437f99600cd`
+- 六常數零改動：抽取 HEAD/current 後兩邊皆為：
+  - `REVEAL_SEC=15`
+  - `REVEAL_MIN_SKIP=5`
+  - `ADMIN_SEC=45`
+  - `CHOOSE_SEC=45`
+  - `TASK_DEADLINE=3`
+  - `PROMOTE_COOLDOWN=3`
+- `grep -o '!important' public/focus.css | wc -l` → `10`
+- `grep -o '!important' public/cards.css | wc -l` → `3`
+- `node --test tests/card-flow.test.cjs` → `tests 29`, `pass 29`, `fail 0`
+- `node --check server.js public/focus.js public/screen.js public/cards.js` 分別通過；`git diff --check` 通過。
+- action 集合比較：
+  - HEAD：`idle,slack,supervise,work`
+  - WORKTREE：`idle,slack,supervise,work`
+  - 沒有新增 action；`supervise` 是既有內部主管 sentinel。一般員工可選動作仍只有 `work/idle/slack`。
+- 沒有新增遊戲規則：**失敗**。至少有預設回合數變更及首局商店歷史 gate。
+- 三王不改 `checkWin` 勝負：**勝負面通過**。`checkWin` 逐字一致，`pickKings` 不改玩家分數／生死；但搞鬼王榮譽結果存在錯誤歸因。
+- 測試是否作弊：**有問題**。
+  - [tests/card-flow.test.cjs:90](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/tests/card-flow.test.cjs:90) 複製 server 公式，沒驗前端。
+  - [tests/card-flow.test.cjs:361](/Users/freedom/Documents/Codex/2026-09-12/https-github-com-juanjunfu-mo-yu/work/mo-yu-wan/tests/card-flow.test.cjs:361) 對所有 malformed handler 只斷言 `doesNotThrow`，完全不檢查狀態不應改變；實際上測試期間 `createRoom` 等 handler 會產生副作用。
+  - 搞鬼王測試把「同回合有 warned 就算命中」的實作假設直接寫進 fixture，沒有兩隻鬼同回合報不同目標的反例。
+  - 沒有 DOM、sessionStorage、CSS layout 或過勞死完整 act 時序測試。
+- 唯讀確認：測試前後 `git status --short` 完全相同；仍是原有 8 個修改檔及既有未追蹤 `.team/`，本次審核沒有改動 repo。
